@@ -50,7 +50,7 @@ def canonicalise(obj: dict) -> bytes:
     Serialize dict to canonical JSON: keys sorted lexicographically,
     no extra whitespace.
     """
-    return json.dumps(obj, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
 
 
 def verify_receipt_chain(
