@@ -18,7 +18,7 @@ def sha256_hex(data: bytes) -> str:
 
 def _sort_dict(obj: Any) -> Any:
     if isinstance(obj, dict):
-        return {k: _sort_dict(v) for k in sorted(obj)}
+        return {k: _sort_dict(obj[k]) for k in sorted(obj)}
     if isinstance(obj, list):
         return [_sort_dict(i) for i in obj]
     return obj
