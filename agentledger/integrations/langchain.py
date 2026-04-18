@@ -150,15 +150,10 @@ class AgentLedgerCallback:
     ) -> None:
         """
         Called when an agent takes an action (e.g. a reasoning step).
-        Records the action as a decision receipt.
+        Decision is already captured by on_chain_start — do NOT create
+        another pending receipt here (would become orphaned before tool exec).
         """
-        # action can be a BaseMessage, AgentAction, or similar
-        payload = str(action)
-        self.chain.append(
-            action_type=ActionType.DECISION,
-            framework=Framework.LANGCHAIN,
-            payload=payload,
-        )
+        pass
 
     def on_agent_finish(
         self,

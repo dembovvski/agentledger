@@ -7,7 +7,6 @@ binding_signature = eth_sign(agent_id_hex) via personal_sign
 
 from __future__ import annotations
 
-import hashlib
 import json
 from typing import Any
 
@@ -90,7 +89,6 @@ class EthereumBinding(PrincipalBinding):
         # "\x19Ethereum Signed Message:\n" + len(message) + message
         prefix = f"\x19Ethereum Signed Message:\n{len(agent_id_hex)}{agent_id_hex}"
         prefix_bytes = prefix.encode("utf-8")
-        msg_hash = hashlib.sha256(prefix_bytes).hexdigest()
 
         signed = self._account.sign_message(dict(rawMsg=prefix_bytes))
         return bytes(signed.signature)
@@ -117,7 +115,7 @@ class EthereumBinding(PrincipalBinding):
 
         try:
             recovered = Account.recover_message(
-                raw_message=f"\x19Ethereum Signed Message:\n{len(agent_public_key.hex())}{agent_public_hex}".encode("utf-8"),
+                raw_message=f"\x19Ethereum Signed Message:\n{len(agent_public_key.hex())}{agent_public_key.hex()}".encode("utf-8"),
                 signature=signature,
             )
         except Exception:
