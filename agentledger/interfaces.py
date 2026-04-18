@@ -312,12 +312,13 @@ def canonicalise_for_signing(receipt: Receipt) -> bytes:
       - 'signature' field excluded
       - all keys sorted lexicographically at every nesting level
     Used by AgentIdentity.sign() and chain verification.
-    Implemented in core/receipt.py — imported here to give bindings a
-    single import point.
+    Delegates to core/receipt.py — imported here as single entry point.
     """
-    raise NotImplementedError
+    from agentledger.core.receipt import canonicalise_for_signing as _impl
+    return _impl(receipt)
 
 
 def sha256_hex(data: bytes) -> str:
     """SHA-256 of bytes, returns lowercase hex string."""
-    raise NotImplementedError
+    from agentledger.core.receipt import sha256_hex as _impl
+    return _impl(data)
