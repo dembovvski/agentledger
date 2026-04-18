@@ -65,24 +65,25 @@ class CrossAgentRef:
 # Receipt — immutable once created
 # ─────────────────────────────────────────────────────────────────────────────
 
-@dataclass(frozen=True)
+@dataclass
 class Receipt:
     receipt_id: str                    # UUIDv4
-    schema_version: str = "0.1"
-    prev_hash: Optional[str] = None    # SHA256 hex; null iff first in chain
     chain_id: str                      # = agent_id (Ed25519 public key hex)
     timestamp: str                     # ISO8601 UTC
     agent_id: str
     principal_id: str
     action: ActionData
+    prev_hash: Optional[str] = None    # SHA256 hex; null iff first in chain
     cross_agent_ref: Optional[CrossAgentRef] = None
     signature: Optional[str] = None    # Ed25519 hex; None = not yet signed
+    schema_version: str = "0.1"
 
     def to_dict(self) -> dict[str, Any]:
-        """Serialise to canonical dict (keys sorted lexicographically)."""
-        # NOTE: signature is excluded when computing canon hashes.
-        # This method is for SERIALISATION only — callers use
-        # canonicalise_for_signing() for hash computation.
+        """Serialise to canonical dict (keys sorted lexicographically).
+
+        NOTE: signature excluded when computing signing payload — use
+        canonicalise_for_signing() for hash computation.
+        """
         raise NotImplementedError
 
 
@@ -299,3 +300,24 @@ class ReceiptChain(abc.ABC):
 class ChainVerificationError(Exception):
     """Raised when chain verification fails."""
     ...
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Canonical serialisation helpers (implemented in core/receipt.py)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def canonicalise_for_signing(receipt: Receipt) -> bytes:
+    """
+    Return deterministic UTF-8 bytes of receipt dict with:
+      - 'signature' field excluded
+      - all keys sorted lexicographically at every nesting level
+    Used by AgentIdentity.sign() and chain verification.
+    Implemented in core/receipt.py — imported here to give bindings a
+    single import point.
+    """
+    raise NotImplementedError
+
+
+def sha256_hex(data: bytes) -> str:
+    """SHA-256 of bytes, returns lowercase hex string."""
+    raise NotImplementedError
