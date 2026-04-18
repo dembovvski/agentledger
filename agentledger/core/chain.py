@@ -167,6 +167,9 @@ class ReceiptChainImpl(ReceiptChainABC):
         with self._lock:
             receipts = list(self._receipts)
 
+        if not receipts:
+            raise ValueError("Cannot verify an empty chain — no receipts found")
+
         prev_hash: Optional[str] = None
         for i, receipt in enumerate(receipts):
             # 1. Check prev_hash linkage
