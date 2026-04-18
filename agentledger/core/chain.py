@@ -70,7 +70,7 @@ class ReceiptChainImpl(ReceiptChainABC):
 
     def _write_line(self, obj: dict[str, Any]) -> None:
         with self._log_file.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(obj, separators=(",", ":"), sort_keys=True) + "\n")
+            f.write(json.dumps(obj, separators=(",", ":"), sort_keys=True, ensure_ascii=False) + "\n")
 
     def _maybe_checkpoint(self) -> None:
         n = len(self._receipts)
@@ -86,7 +86,7 @@ class ReceiptChainImpl(ReceiptChainABC):
                 "receipt_count": n,
             }
             sig = self.identity.sign(
-                json.dumps(cp, separators=(",", ":"), sort_keys=True).encode()
+                json.dumps(cp, separators=(",", ":"), sort_keys=True, ensure_ascii=False).encode()
             )
             cp["signature"] = sig.hex()
             self._write_line(cp)

@@ -132,24 +132,26 @@ def _verify_full(
             if not sig_hex:
                 return False, f"{path}:{i+1}: missing signature"
             try:
-                from nacl.signing import VerifyKey
-                from nacl.encoding import HexEncoder
+                from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+                from cryptography.exceptions import InvalidSignature
             except ImportError:
                 return False, (
-                    f"{path}: requires PyNaCl for signature verification. "
-                    "Install: pip install agentledger[crypto]"
+                    f"{path}: requires cryptography library. "
+                    "Install: pip install agentledger"
                 )
             try:
-                vk = VerifyKey(agent_public_key, encoder=HexEncoder)
-                # Build signing payload = receipt without signature field
+                pub = Ed25519PublicKey.from_public_bytes(agent_public_key)
                 receipt_for_signing = {k: v for k, v in receipt.items() if k != "signature"}
                 payload_bytes = canonicalise(receipt_for_signing)
-                vk.verify(payload_bytes, sig_hex, encoder=HexEncoder)
+                pub.verify(bytes.fromhex(sig_hex), payload_bytes)
+            except InvalidSignature:
+                return False, f"{path}:{i+1}: signature verification failed"
             except Exception as e:
-                return False, f"{path}:{i+1}: signature verification failed — {e}"
+                return False, f"{path}:{i+1}: signature error — {e}"
 
-        # Compute prev_hash for next iteration
-        prev_hash = compute_sha256_hex(canonicalise(receipt))
+        # prev_hash for next receipt must be computed WITHOUT signature field
+        receipt_for_hash = {k: v for k, v in receipt.items() if k != "signature"}
+        prev_hash = compute_sha256_hex(canonicalise(receipt_for_hash))
         prev_receipt = receipt
 
     # Verify checkpoint cumulative hashes
@@ -177,16 +179,35 @@ def _verify_tail(
     path: Path,
 ) -> tuple[bool, str]:
     """Verify only the tail from the last checkpoint."""
-    prev_hash = compute_sha256_hex(canonicalise(prev_receipt)) if prev_receipt else None
+    if prev_receipt:
+        prev_for_hash = {k: v for k, v in prev_receipt.items() if k != "signature"}
+        prev_hash: str | None = compute_sha256_hex(canonicalise(prev_for_hash))
+    else:
+        prev_hash = None
 
     for i, receipt in enumerate(tail):
-        expected_prev = prev_hash
-        actual_prev = receipt.get("prev_hash")
-        if actual_prev != expected_prev:
+        if receipt.get("prev_hash") != prev_hash:
             return False, (
-                f"{path}: tail:{i+1}: prev_hash mismatch — expected {expected_prev}"
+                f"{path}: tail:{i+1}: prev_hash mismatch — expected {prev_hash}"
             )
-        prev_hash = compute_sha256_hex(canonicalise(receipt))
+
+        if agent_public_key:
+            sig_hex = receipt.get("signature")
+            if not sig_hex:
+                return False, f"{path}: tail:{i+1}: missing signature"
+            try:
+                from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+                from cryptography.exceptions import InvalidSignature
+                pub = Ed25519PublicKey.from_public_bytes(agent_public_key)
+                receipt_for_signing = {k: v for k, v in receipt.items() if k != "signature"}
+                pub.verify(bytes.fromhex(sig_hex), canonicalise(receipt_for_signing))
+            except InvalidSignature:
+                return False, f"{path}: tail:{i+1}: signature verification failed"
+            except Exception as e:
+                return False, f"{path}: tail:{i+1}: signature error — {e}"
+
+        receipt_for_hash = {k: v for k, v in receipt.items() if k != "signature"}
+        prev_hash = compute_sha256_hex(canonicalise(receipt_for_hash))
 
     return True, f"{path}: {len(tail)} tail receipts verified (from checkpoint)"
 
