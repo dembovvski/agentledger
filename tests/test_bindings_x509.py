@@ -20,34 +20,38 @@ AGENT_PUBKEY = bytes.fromhex("a1b2c3d4e5f6" + "00" * 26)
 
 
 def _generate_test_cert_and_key():
-    """Generate a self-signed RSA cert + key for testing. Returns (cert_pem, key_pem)."""
-    from cryptography import x509
-    from cryptography.x509.oid import NameOID
-    from cryptography.hazmat.primitives import hashes, serialization
-    from cryptography.hazmat.primitives.asymmetric import rsa
-    from cryptography.hazmat.backends import default_backend
-    import datetime
+    """
+    Generate a self-signed RSA cert + key for testing using OpenSSL CLI.
+    Returns (cert_pem, key_pem) as bytes.
+    """
+    import subprocess, tempfile, os
 
-    private_key = rsa.generate_private_key(
-        public_exponent=65537, key_size=2048, backend=default_backend()
-    )
-    subject = issuer = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "test.example.com")])
-    cert = (
-        x509.CertificateBuilder()
-        .subject_name(subject)
-        .issuer_name(issuer)
-        .public_key(private_key.public_key())
-        .serial_number(x509.random_serial_number())
-        .not_valid_before(datetime.datetime.utcnow())
-        .not_valid_after(datetime.datetime.utcnow() + datetime.timedelta(days=1))
-        .sign(private_key, hashes.SHA256(), default_backend())
-    )
-    cert_pem = cert.public_bytes(serialization.Encoding.PEM)
-    key_pem = private_key.private_bytes(
-        serialization.Encoding.PEM,
-        serialization.NoEncryption(),
-        serialization.PrivateFormat.TraditionalOpenSSL,
-    )
+    with tempfile.TemporaryDirectory() as tmpdir:
+        key_path = os.path.join(tmpdir, "test.key")
+        cert_path = os.path.join(tmpdir, "test.crt")
+
+        # Generate RSA private key with OpenSSL
+        subprocess.run(
+            ["openssl", "genrsa", "-out", key_path, "2048"],
+            check=True, capture_output=True
+        )
+        # Self-signed certificate
+        subprocess.run(
+            [
+                "openssl", "req", "-new", "-x509",
+                "-key", key_path, "-out", cert_path,
+                "-days", "1",
+                "-subj", "/CN=test.example.com",
+                "-batch",
+            ],
+            check=True, capture_output=True
+        )
+
+        with open(cert_path, "rb") as f:
+            cert_pem = f.read()
+        with open(key_path, "rb") as f:
+            key_pem = f.read()
+
     return cert_pem, key_pem
 
 
@@ -74,7 +78,7 @@ class TestX509BindingBind:
 
     def test_bind_returns_signature_bytes(self, x509_binding_signing):
         """bind() returns raw signature bytes (not PEM)."""
-        pid = x509_binding_signing.fingerprint
+        pid = f"sha256:{x509_binding_signing.fingerprint}"
         sig = x509_binding_signing.bind(AGENT_PUBKEY, pid)
         assert isinstance(sig, bytes)
         assert len(sig) > 0
@@ -85,12 +89,10 @@ class TestX509BindingBind:
         sig = x509_binding_signing.bind(AGENT_PUBKEY, expected_fp)
         assert isinstance(sig, bytes)
 
-    def test_bind_accepts_subject_dn_as_principal_id(self, x509_binding_signing, rsa_cert_and_key):
+    def test_bind_accepts_subject_dn_as_principal_id(self, x509_binding_signing):
         """principal_id can be the certificate's Subject DN."""
-        cert_pem, _ = rsa_cert_and_key
-        binding = X509Binding(cert_bytes=cert_pem)
-        dn = binding.subject_dn
-        sig = binding.bind(AGENT_PUBKEY, dn)
+        dn = x509_binding_signing.subject_dn
+        sig = x509_binding_signing.bind(AGENT_PUBKEY, dn)
         assert isinstance(sig, bytes)
 
     def test_bind_mismatched_principal_id_raises(self, x509_binding_signing):
@@ -130,7 +132,8 @@ class TestX509BindingVerify:
 
     def test_verify_wrong_principal_id_returns_false(self, x509_binding_signing):
         """Signature for wrong principal_id returns False."""
-        sig = x509_binding_signing.bind(AGENT_PUBKEY, x509_binding_signing.fingerprint)
+        pid = f"sha256:{x509_binding_signing.fingerprint}"
+        sig = x509_binding_signing.bind(AGENT_PUBKEY, pid)
         wrong_pid = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
         assert x509_binding_signing.verify(AGENT_PUBKEY, wrong_pid, sig) is False
 

@@ -53,6 +53,11 @@ def canonicalise(obj: dict) -> bytes:
     return json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
 
 
+def _no_sig(receipt: dict) -> bytes:
+    """Canonicalise a receipt dict with the signature field excluded."""
+    return canonicalise({k: v for k, v in receipt.items() if k != "signature"})
+
+
 def verify_receipt_chain(
     path: Path,
     *,
@@ -90,9 +95,9 @@ def verify_receipt_chain(
         # Find the last checkpoint
         ckpt = checkpoints[-1]
         ckpt_receipt_count = ckpt.get("receipt_count", 0)
-        # Verify cumulative hash of receipts 1..N
+        # Verify cumulative hash of receipts 1..N (signature excluded — consistent with core)
         batch = data_receipts[:ckpt_receipt_count]
-        cumulative = b"".join(canonicalise(r) for r in batch)
+        cumulative = b"".join(_no_sig(r) for r in batch)
         expected_cumulative = compute_sha256_hex(cumulative)
         if ckpt.get("cumulative_hash") != expected_cumulative:
             return False, (
@@ -162,7 +167,7 @@ def _verify_full(
         if idx is None:
             return False, f"{path}: checkpoint at {at_id} references unknown receipt"
         batch = receipts[: idx + 1]
-        cumulative = b"".join(canonicalise(r) for r in batch)
+        cumulative = b"".join(_no_sig(r) for r in batch)
         expected = compute_sha256_hex(cumulative)
         if ckpt.get("cumulative_hash") != expected:
             return False, (
