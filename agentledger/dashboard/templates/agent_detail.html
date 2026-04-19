@@ -1,0 +1,137 @@
+{% extends "layout.html" %}
+
+{% block title %}Agent {{ agent.short_id }}… — AgentLedger{% endblock %}
+
+{% block content %}
+
+<a href="/agents" class="back-link">&larr; All agents</a>
+
+<div class="page-header">
+    <div>
+        <h1 class="page-title">Agent</h1>
+        <p class="page-subtitle code" style="font-family: var(--mono); font-size: 0.8rem; word-break: break-all;">{{ agent.agent_id }}</p>
+    </div>
+</div>
+
+{# Chain verify banner #}
+{% if agent.chain_valid %}
+<div class="verify-banner valid">
+    <span class="verify-icon">&#10003;</span>
+    Chain valid &mdash; {{ agent.receipt_count }} receipts verified
+</div>
+{% else %}
+<div class="verify-banner invalid">
+    <span class="verify-icon">&#10007;</span>
+    Chain verification failed &mdash; {{ agent.chain_error or 'unknown error' }}
+</div>
+{% endif %}
+
+{# Stats #}
+{% set completed = 0 %}
+{% set failed = 0 %}
+{% set denied = 0 %}
+{% set pending = 0 %}
+{% set cross_count = 0 %}
+{% for r in receipts %}
+    {% if r.status == 'completed' %}{% set completed = completed + 1 %}{% endif %}
+    {% if r.status == 'failed' %}{% set failed = failed + 1 %}{% endif %}
+    {% if r.status == 'denied' %}{% set denied = denied + 1 %}{% endif %}
+    {% if r.status == 'pending' %}{% set pending = pending + 1 %}{% endif %}
+    {% if r.has_cross_ref %}{% set cross_count = cross_count + 1 %}{% endif %}
+{% endfor %}
+
+<div class="stats-row">
+    <div class="stat-card completed">
+        <div class="stat-value">{{ completed }}</div>
+        <div class="stat-label">Completed</div>
+    </div>
+    <div class="stat-card failed">
+        <div class="stat-value">{{ failed }}</div>
+        <div class="stat-label">Failed</div>
+    </div>
+    <div class="stat-card denied">
+        <div class="stat-value">{{ denied }}</div>
+        <div class="stat-label">Denied</div>
+    </div>
+    <div class="stat-card pending">
+        <div class="stat-value">{{ pending }}</div>
+        <div class="stat-label">Pending</div>
+    </div>
+    <div class="stat-card cross">
+        <div class="stat-value">{{ cross_count }}</div>
+        <div class="stat-label">Cross-agent</div>
+    </div>
+</div>
+
+{# Filter bar #}
+<div class="filter-bar">
+    <button class="filter-btn active" onclick="filterTimeline('all')">All</button>
+    <button class="filter-btn" onclick="filterTimeline('completed')">Completed</button>
+    <button class="filter-btn" onclick="filterTimeline('failed')">Failed</button>
+    <button class="filter-btn" onclick="filterTimeline('denied')">Denied</button>
+    <button class="filter-btn" onclick="filterTimeline('cross-agent')">Cross-agent</button>
+</div>
+
+{# Timeline #}
+{% if receipts|length == 0 %}
+<div class="empty-state">
+    <div class="empty-icon">&#9670;</div>
+    <p>No receipts for this agent yet.</p>
+</div>
+{% else %}
+<div class="timeline" id="timeline">
+{% for r in receipts %}
+    <div class="timeline-item {{ r.status }}" data-status="{{ r.status }}" data-has-cross="{{ r.has_cross_ref }}">
+        <a href="/receipts/{{ r.receipt_id }}" class="timeline-card">
+            <div class="timeline-header">
+                <span class="timeline-action">
+                    <span class="status-dot {{ r.status }}"></span>
+                    {{ r.action_type }}
+                    {% if r.tool_name %}
+                        &mdash; {{ r.tool_name }}
+                    {% endif %}
+                </span>
+                <span class="timeline-time">{{ r.timestamp }}</span>
+            </div>
+            <div class="timeline-meta">
+                <span class="framework">{{ r.framework }}</span>
+                {% if r.has_cross_ref %}
+                <span style="color: var(--status-cross-agent); font-size: 0.75rem; font-weight: 600;">
+                    &#8594; cross-ref {{ r.cross_agent_ref.status if r.cross_agent_ref else 'pending' }}
+                </span>
+                {% endif %}
+                <span style="font-family: var(--mono); font-size: 0.7rem; opacity: 0.6;">
+                    {{ r.short_id }}…
+                </span>
+            </div>
+            {% if r.error %}
+            <div style="margin-top: 0.5rem; font-size: 0.8rem; color: var(--status-failed);">
+                {{ r.error }}
+            </div>
+            {% endif %}
+        </a>
+    </div>
+{% endfor %}
+</div>
+{% endif %}
+
+<script>
+function filterTimeline(status) {
+    document.querySelectorAll('.filter-btn').forEach(function(btn) {
+        btn.classList.toggle('active', btn.textContent.trim().toLowerCase() === status || (status === 'all' && btn.textContent.trim() === 'All'));
+    });
+    document.querySelectorAll('.timeline-item').forEach(function(item) {
+        var show = status === 'all';
+        if (!show) {
+            if (status === 'cross-agent') {
+                show = item.dataset.hasCross === 'True';
+            } else {
+                show = item.dataset.status === status;
+            }
+        }
+        item.style.display = show ? '' : 'none';
+    });
+}
+</script>
+
+{% endblock %}

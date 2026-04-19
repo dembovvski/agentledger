@@ -20,13 +20,17 @@
 {% for agent in agents %}
     <a href="/agents/{{ agent.agent_id }}" class="agent-row">
         <div>
-            <div class="agent-id">{{ agent.agent_id }}</div>
+            <div class="agent-id">{{ agent.short_id }}…</div>
             <div class="agent-meta">
                 Last seen {{ agent.last_seen }} &middot; {{ agent.receipt_count }} receipt{{ '' if agent.receipt_count == 1 else 's' }}
             </div>
         </div>
         <div>
+            {% if agent.chain_valid %}
             <span class="badge badge-valid">chain valid</span>
+            {% else %}
+            <span class="badge badge-invalid" title="{{ agent.chain_error }}">chain invalid</span>
+            {% endif %}
         </div>
         <div class="agent-meta">&rarr;</div>
     </a>

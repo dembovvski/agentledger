@@ -28,7 +28,7 @@ except ImportError as e:
         "Install: pip install 'agentledger[dashboard]'"
     ) from e
 
-from agentledger.dashboard.reader import AgentSummary, ReceiptRow, read_receipts, scan_agents
+from agentledger.dashboard.reader import AgentSummary, ReceiptRow, read_receipts, scan_agents, get_receipt_by_id
 
 app = FastAPI(title="AgentLedger Dashboard", docs_url=None, redoc_url=None)
 
@@ -72,18 +72,81 @@ def agents_page(request: Request):
     })
 
 
+@app.get("/timeline", response_class=HTMLResponse)
+def timeline_page(request: Request):
+    """
+    Global cross-agent timeline — all receipts from all agents, chronologically.
+    """
+    storage = _require_storage()
+    agents = scan_agents(storage)
+
+    # Collect all receipts across all agent files
+    all_receipts: list[ReceiptRow] = []
+    for agent in agents:
+        all_receipts.extend(read_receipts(agent.jsonl_path))
+
+    # Sort chronologically
+    all_receipts.sort(key=lambda r: r.timestamp)
+
+    # Compute global stats
+    stats = {"completed": 0, "failed": 0, "denied": 0, "pending": 0, "cross_agent": 0}
+    for r in all_receipts:
+        s = r.status
+        if s == "completed":
+            stats["completed"] += 1
+        elif s == "failed":
+            stats["failed"] += 1
+        elif s == "denied":
+            stats["denied"] += 1
+        elif s == "pending":
+            stats["pending"] += 1
+        if r.has_cross_ref:
+            stats["cross_agent"] += 1
+
+    return templates.TemplateResponse("timeline.html", {
+        "request": request,
+        "agents": agents,
+        "receipts": all_receipts,
+        "stats": stats,
+        "total_count": len(all_receipts),
+    })
+
+
 @app.get("/agents/{agent_id}", response_class=HTMLResponse)
-def agent_timeline_page(request: Request, agent_id: str):
+def agent_detail_page(request: Request, agent_id: str):
     storage = _require_storage()
     agents = scan_agents(storage)
     agent = next((a for a in agents if a.agent_id == agent_id), None)
     if agent is None:
         raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
     receipts = read_receipts(agent.jsonl_path)
-    return templates.TemplateResponse("timeline.html", {
+    return templates.TemplateResponse("agent_detail.html", {
         "request": request,
         "agent": agent,
         "receipts": receipts,
+    })
+
+
+@app.get("/receipts/{receipt_id}", response_class=HTMLResponse)
+def receipt_detail_page(request: Request, receipt_id: str):
+    storage = _require_storage()
+    receipt_row, jsonl_path = get_receipt_by_id(storage, receipt_id)
+    if receipt_row is None:
+        raise HTTPException(status_code=404, detail=f"Receipt {receipt_id} not found")
+
+    # Verify chain
+    from agentledger.cli.verify import verify_receipt_chain
+    if jsonl_path:
+        ok, msg = verify_receipt_chain(jsonl_path, agent_public_key=None)
+        verify_result = {"valid": ok, "message": msg}
+    else:
+        verify_result = {"valid": False, "message": "Chain file not found"}
+
+    return templates.TemplateResponse("receipt_detail.html", {
+        "request": request,
+        "receipt": receipt_row,
+        "receipt_id": receipt_id,
+        "verify_result": verify_result,
     })
 
 
@@ -148,4 +211,7 @@ def _receipt_to_dict(r: ReceiptRow) -> dict:
         "prev_hash": r.prev_hash,
         "has_cross_ref": r.has_cross_ref,
         "cross_agent_ref": r.cross_agent_ref,
+        "agent_id": r.agent_id,
+        "chain_id": r.chain_id,
+        "principal_id": r.principal_id,
     }

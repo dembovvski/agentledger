@@ -1,0 +1,125 @@
+{% extends "layout.html" %}
+
+{% block title %}Receipt {{ receipt.short_id }}… — AgentLedger{% endblock %}
+
+{% block content %}
+
+<a href="/agents/{{ receipt.agent_id }}" class="back-link">&larr; Back to agent</a>
+
+<div class="receipt-detail">
+    <div class="page-header">
+        <div>
+            <h1 class="page-title">Receipt Detail</h1>
+            <p class="page-subtitle receipt-id">{{ receipt.receipt_id }}</p>
+        </div>
+        <span class="badge badge-valid">verified</span>
+    </div>
+
+    {# Chain verify banner #}
+    {% if verify_result.valid %}
+    <div class="verify-banner valid">
+        <span class="verify-icon">&#10003;</span>
+        Chain valid &mdash; {{ verify_result.message }}
+    </div>
+    {% else %}
+    <div class="verify-banner invalid">
+        <span class="verify-icon">&#10007;</span>
+        {{ verify_result.message }}
+    </div>
+    {% endif %}
+
+    {# Identity block — from raw receipt stored on ReceiptRow via receipt.raw #}
+    {% if receipt.agent_id %}
+    <div class="detail-section">
+        <h3>Identity</h3>
+        <div class="detail-grid">
+            <span class="detail-label">Agent ID</span>
+            <span class="detail-value">{{ receipt.agent_id }}</span>
+        </div>
+    </div>
+    {% endif %}
+
+    {# Action block — ReceiptRow fields #}
+    <div class="detail-section">
+        <h3>Action</h3>
+        <div class="detail-grid">
+            <span class="detail-label">Type</span>
+            <span class="detail-value tool-name">{{ receipt.action_type }}</span>
+
+            <span class="detail-label">Framework</span>
+            <span class="detail-value">{{ receipt.framework }}</span>
+
+            {% if receipt.tool_name %}
+            <span class="detail-label">Tool</span>
+            <span class="detail-value tool-name">{{ receipt.tool_name }}</span>
+            {% endif %}
+
+            <span class="detail-label">Status</span>
+            <span class="detail-value">
+                <span class="status-dot {{ receipt.status }}"></span>
+                {{ receipt.status }}
+            </span>
+
+            {% if receipt.payload_hash %}
+            <span class="detail-label">Payload hash</span>
+            <span class="detail-value">{{ receipt.payload_hash }}</span>
+            {% endif %}
+
+            {% if receipt.result_hash %}
+            <span class="detail-label">Result hash</span>
+            <span class="detail-value">{{ receipt.result_hash }}</span>
+            {% endif %}
+
+            {% if receipt.error %}
+            <span class="detail-label">Error</span>
+            <span class="detail-value" style="color: var(--status-failed);">{{ receipt.error }}</span>
+            {% endif %}
+        </div>
+    </div>
+
+    {# Chain linkage #}
+    <div class="detail-section">
+        <h3>Chain Linkage</h3>
+        <div class="detail-grid">
+            <span class="detail-label">prev_hash</span>
+            <span class="detail-value">
+                {% if receipt.prev_hash %}
+                {{ receipt.prev_hash }}
+                {% else %}
+                <em style="color: var(--text-muted); font-family: var(--font);">(genesis)</em>
+                {% endif %}
+            </span>
+        </div>
+    </div>
+
+    {# Cross-agent reference #}
+    {% if receipt.cross_agent_ref %}
+    <div class="detail-section">
+        <h3>Cross-Agent Reference</h3>
+        <div class="cross-ref-box">
+            <div class="ref-agent">Agent: {{ receipt.cross_agent_ref.target_agent_id or receipt.cross_agent_ref.get('target_agent_id', 'unknown') }}</div>
+            <div>Receipt: <code>{{ receipt.cross_agent_ref.ref_receipt_id or receipt.cross_agent_ref.get('ref_receipt_id', 'unknown') }}</code></div>
+            <div class="ref-status {{ receipt.cross_agent_ref.status }}">
+                {{ receipt.cross_agent_ref.status }}
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    {# Signature #}
+    <div class="detail-section">
+        <h3>Signature</h3>
+        <div class="detail-grid">
+            <span class="detail-label">Ed25519</span>
+            <span class="detail-value" style="word-break: break-all; font-size: 0.72rem;">
+                {% if receipt.signature %}
+                {{ receipt.signature }}
+                {% else %}
+                <em style="color: var(--text-muted); font-family: var(--font);">(pending)</em>
+                {% endif %}
+            </span>
+        </div>
+    </div>
+</div>
+
+{% endblock %}

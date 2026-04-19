@@ -28,6 +28,9 @@ class ReceiptRow:
     prev_hash: Optional[str]
     signature: Optional[str]
     cross_agent_ref: Optional[dict]
+    agent_id: str = ""          # chain owner — used for back-link in detail view
+    chain_id: str = ""          # same as agent_id for single-agent chains
+    principal_id: str = ""     # principal binding
     schema_version: str = "0.1"
 
     @property
@@ -90,6 +93,9 @@ def _parse_receipt(obj: dict) -> Optional[ReceiptRow]:
         prev_hash=obj.get("prev_hash"),
         signature=obj.get("signature"),
         cross_agent_ref=cross if cross and any(cross.values()) else None,
+        agent_id=obj.get("agent_id", ""),
+        chain_id=obj.get("chain_id", ""),
+        principal_id=obj.get("principal_id", ""),
         schema_version=obj.get("schema_version", "0.1"),
     )
 
@@ -178,3 +184,17 @@ def _extract_agent_id(jsonl_file: Path, rows: list[ReceiptRow]) -> Optional[str]
     except (OSError, json.JSONDecodeError):
         pass
     return None
+
+
+def get_receipt_by_id(storage_path: Path, receipt_id: str) -> tuple[Optional[ReceiptRow], Optional[Path]]:
+    """
+    Find a receipt by ID across all JSONL files in storage_path.
+
+    Returns (receipt_row, jsonl_path) or (None, None) if not found.
+    """
+    for jsonl_file in sorted(storage_path.glob("*.jsonl")):
+        rows = read_receipts(jsonl_file)
+        for row in rows:
+            if row.receipt_id == receipt_id:
+                return row, jsonl_file
+    return None, None

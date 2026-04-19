@@ -1,0 +1,102 @@
+{% extends "layout.html" %}
+
+{% block title %}Timeline — AgentLedger{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1 class="page-title">Timeline</h1>
+        <p class="page-subtitle">{{ total_count }} receipt{{ '' if total_count == 1 else 's' }} across all agents</p>
+    </div>
+</div>
+
+{# Stats #}
+<div class="stats-row">
+    <div class="stat-card completed">
+        <div class="stat-value">{{ stats.completed }}</div>
+        <div class="stat-label">Completed</div>
+    </div>
+    <div class="stat-card failed">
+        <div class="stat-value">{{ stats.failed }}</div>
+        <div class="stat-label">Failed</div>
+    </div>
+    <div class="stat-card denied">
+        <div class="stat-value">{{ stats.denied }}</div>
+        <div class="stat-label">Denied</div>
+    </div>
+    <div class="stat-card cross">
+        <div class="stat-value">{{ stats.cross_agent }}</div>
+        <div class="stat-label">Cross-agent</div>
+    </div>
+</div>
+
+{# Filter bar #}
+<div class="filter-bar">
+    <button class="filter-btn active" onclick="filterTimeline('all')">All</button>
+    <button class="filter-btn" onclick="filterTimeline('completed')">Completed</button>
+    <button class="filter-btn" onclick="filterTimeline('failed')">Failed</button>
+    <button class="filter-btn" onclick="filterTimeline('denied')">Denied</button>
+    <button class="filter-btn" onclick="filterTimeline('cross-agent')">Cross-agent</button>
+</div>
+
+{# Timeline #}
+{% if receipts|length == 0 %}
+<div class="empty-state">
+    <div class="empty-icon">&#9670;</div>
+    <p>No receipts found.</p>
+</div>
+{% else %}
+<div class="timeline" id="timeline">
+{% for item in receipts %}
+    <div class="timeline-item {{ item.status }}" data-status="{{ item.status }}">
+        <a href="/receipts/{{ item.receipt.receipt_id }}" class="timeline-card">
+            <div class="timeline-header">
+                <span class="timeline-action">
+                    <span class="status-dot {{ item.status }}"></span>
+                    {{ item.action_type }}
+                    {% if item.tool_name %}
+                        &mdash; {{ item.tool_name }}
+                    {% endif %}
+                </span>
+                <span class="timeline-time">{{ item.timestamp }}</span>
+            </div>
+            <div class="timeline-meta">
+                <span class="framework">{{ item.framework }}</span>
+                <span style="font-size: 0.75rem;">
+                    &rarr; <a href="/agents/{{ item.agent_id }}" style="color: inherit;"
+                        onclick="event.stopPropagation();">{{ item.agent_id[:16] }}…</a>
+                </span>
+                {% if item.cross_agent_ref %}
+                <span style="color: var(--status-cross-agent); font-size: 0.75rem; font-weight: 600;">
+                    &#8594; cross-ref {{ item.cross_agent_ref.status }}
+                </span>
+                {% endif %}
+                <span class="receipt-id" style="font-family: var(--mono); font-size: 0.7rem; opacity: 0.6;">
+                    {{ item.receipt.receipt_id[:16] }}…
+                </span>
+            </div>
+            {% if item.error %}
+            <div style="margin-top: 0.5rem; font-size: 0.8rem; color: var(--status-failed);">
+                {{ item.error }}
+            </div>
+            {% endif %}
+        </a>
+    </div>
+{% endfor %}
+</div>
+{% endif %}
+
+<script>
+function filterTimeline(status) {
+    document.querySelectorAll('.filter-btn').forEach(function(btn) {
+        var btnText = btn.textContent.trim();
+        var isActive = (status === 'all' && btnText === 'All') || btnText.toLowerCase() === status;
+        btn.classList.toggle('active', isActive);
+    });
+    document.querySelectorAll('.timeline-item').forEach(function(item) {
+        item.style.display = (status === 'all' || item.dataset.status === status) ? '' : 'none';
+    });
+}
+</script>
+
+{% endblock %}
