@@ -1,0 +1,36 @@
+{% extends "layout.html" %}
+
+{% block title %}Agents — AgentLedger{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1 class="page-title">Agents</h1>
+        <p class="page-subtitle">{{ agents|length }} agent{{ '' if agents|length == 1 else 's' }} tracked</p>
+    </div>
+</div>
+
+{% if agents|length == 0 %}
+<div class="empty-state">
+    <div class="empty-icon">&#9670;</div>
+    <p>No agents found. Configure <code>AGENTLEDGER_STORAGE_PATH</code> to point to your JSONL files.</p>
+</div>
+{% else %}
+<div class="agent-list">
+{% for agent in agents %}
+    <a href="/agents/{{ agent.agent_id }}" class="agent-row">
+        <div>
+            <div class="agent-id">{{ agent.agent_id }}</div>
+            <div class="agent-meta">
+                Last seen {{ agent.last_seen }} &middot; {{ agent.receipt_count }} receipt{{ '' if agent.receipt_count == 1 else 's' }}
+            </div>
+        </div>
+        <div>
+            <span class="badge badge-valid">chain valid</span>
+        </div>
+        <div class="agent-meta">&rarr;</div>
+    </a>
+{% endfor %}
+</div>
+{% endif %}
+{% endblock %}
