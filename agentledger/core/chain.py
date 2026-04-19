@@ -14,11 +14,14 @@ from typing import Any, Optional
 
 from agentledger.interfaces import (
     ActionData,
+    ActionPolicy,
     ActionStatus,
     ActionType,
     ChainVerificationError,
     CrossAgentRef,
     Framework,
+    PolicyVerdict,
+    PolicyViolationError,
     Receipt,
     ReceiptChain as ReceiptChainABC,
 )
@@ -36,8 +39,10 @@ class ReceiptChainImpl(ReceiptChainABC):
         *,
         storage_path: str,
         checkpoint_interval: int = 100,
+        policy: Optional[ActionPolicy] = None,
     ) -> None:
         super().__init__(identity, storage_path=storage_path, checkpoint_interval=checkpoint_interval)
+        self._policy = policy
         self._lock = threading.RLock()
         self._receipts: list[Receipt] = []
         self._pending: Optional[Receipt] = None
@@ -91,6 +96,33 @@ class ReceiptChainImpl(ReceiptChainABC):
             cp["signature"] = sig.hex()
             self._write_line(cp)
 
+    def _record_denied(
+        self,
+        action_type: ActionType,
+        framework: Framework,
+        tool_name: Optional[str],
+        reason: str,
+    ) -> None:
+        receipt = Receipt(
+            receipt_id=str(uuid.uuid4()),
+            chain_id=self.identity.agent_id,
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            agent_id=self.identity.agent_id,
+            principal_id=self.identity.principal_id,
+            action=ActionData(
+                type=action_type,
+                framework=framework,
+                tool_name=tool_name,
+                status=ActionStatus.DENIED,
+                error=f"policy:denied — {reason}",
+            ),
+            prev_hash=self._prev_hash(),
+        )
+        self._sign_receipt(receipt)
+        self._receipts.append(receipt)
+        self._write_line(receipt_to_dict(receipt))
+        self._maybe_checkpoint()
+
     # ── Public API ────────────────────────────────────────────────────────────
 
     def append(
@@ -103,6 +135,14 @@ class ReceiptChainImpl(ReceiptChainABC):
         cross_agent_ref: Optional[CrossAgentRef] = None,
     ) -> str:
         with self._lock:
+            # Pre-execution policy gate
+            if self._policy is not None:
+                policy_payload = str(payload) if payload is not None else None
+                result = self._policy.evaluate(action_type, tool_name, policy_payload)
+                if result.verdict == PolicyVerdict.DENY:
+                    self._record_denied(action_type, framework, tool_name, result.reason)
+                    raise PolicyViolationError(tool_name, result.reason)
+
             # Orphaned pending receipt (never finalised) gets force-failed.
             if self._pending is not None:
                 self._pending.action.status = ActionStatus.FAILED

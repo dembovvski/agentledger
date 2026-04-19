@@ -22,6 +22,7 @@ class ActionStatus(str, Enum):
     PENDING = "pending"
     COMPLETED = "completed"
     FAILED = "failed"
+    DENIED = "denied"
 
 
 class ActionType(str, Enum):
@@ -300,6 +301,50 @@ class ReceiptChain(abc.ABC):
 class ChainVerificationError(Exception):
     """Raised when chain verification fails."""
     ...
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Pre-execution policy gate
+# ─────────────────────────────────────────────────────────────────────────────
+
+class PolicyVerdict(str, Enum):
+    ALLOW = "allow"
+    DENY = "deny"
+
+
+@dataclass
+class PolicyResult:
+    verdict: PolicyVerdict
+    reason: str = ""
+
+
+class ActionPolicy(abc.ABC):
+    """
+    Pre-execution gate evaluated before every receipt is appended.
+
+    Implementations decide ALLOW / DENY for each action.
+    DENY causes a signed DENIED receipt to be written (tamper-evident),
+    then raises PolicyViolationError — agent flow is interrupted.
+    """
+
+    @abc.abstractmethod
+    def evaluate(
+        self,
+        action_type: ActionType,
+        tool_name: Optional[str],
+        payload: Optional[str],
+    ) -> PolicyResult:
+        """Return ALLOW or DENY with an optional reason string."""
+        ...
+
+
+class PolicyViolationError(Exception):
+    """Raised when an ActionPolicy denies an action."""
+
+    def __init__(self, tool_name: Optional[str], reason: str) -> None:
+        self.tool_name = tool_name
+        self.reason = reason
+        super().__init__(f"Policy denied '{tool_name}': {reason}")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
