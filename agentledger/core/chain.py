@@ -5,6 +5,7 @@ and optional checkpoint hashes.
 
 from __future__ import annotations
 
+import copy
 import json
 import threading
 import uuid
@@ -135,6 +136,10 @@ class ReceiptChainImpl(ReceiptChainABC):
         cross_agent_ref: Optional[CrossAgentRef] = None,
     ) -> str:
         with self._lock:
+            # Validate tool_name for TOOL_CALL actions
+            if action_type == ActionType.TOOL_CALL and tool_name is None:
+                raise ValueError("tool_name is required for ActionType.TOOL_CALL")
+
             # Pre-execution policy gate
             if self._policy is not None:
                 policy_payload = str(payload) if payload is not None else None
@@ -241,4 +246,18 @@ class ReceiptChainImpl(ReceiptChainABC):
 
     def iter_receipts(self) -> list[Receipt]:
         with self._lock:
-            return list(self._receipts)
+            return [copy.deepcopy(r) for r in self._receipts]
+
+    def verify_from_disk(self) -> tuple[bool, str]:
+        """
+        Verify the persisted JSONL file against the Ed25519 public key.
+
+        Unlike verify(), this reads from disk — catching tampering that happened
+        after the chain was written (e.g. direct file edits).
+        Returns (is_valid, human_message) — same contract as cli.verify.verify_receipt_chain.
+        """
+        from agentledger.cli.verify import verify_receipt_chain
+        return verify_receipt_chain(
+            self._log_file,
+            agent_public_key=bytes.fromhex(self.identity.agent_id),
+        )

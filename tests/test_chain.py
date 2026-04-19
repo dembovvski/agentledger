@@ -19,13 +19,13 @@ def make_chain(identity, tmp_path):
 
 def test_append_returns_receipt_id(identity, tmp_path):
     chain = make_chain(identity, tmp_path)
-    rid = chain.append(ActionType.TOOL_CALL, Framework.CUSTOM)
+    rid = chain.append(ActionType.TOOL_CALL, Framework.CUSTOM, tool_name="test_tool")
     assert isinstance(rid, str) and len(rid) == 36
 
 
 def test_finalize_completed(identity, tmp_path):
     chain = make_chain(identity, tmp_path)
-    chain.append(ActionType.TOOL_CALL, Framework.CUSTOM, payload={"x": 1})
+    chain.append(ActionType.TOOL_CALL, Framework.CUSTOM, tool_name="test_tool", payload={"x": 1})
     chain.finalize_last(status=ActionStatus.COMPLETED, result={"ok": True})
     r = chain.iter_receipts()[0]
     assert r.action.status == ActionStatus.COMPLETED
@@ -49,7 +49,7 @@ def test_finalize_noop_when_no_pending(identity, tmp_path):
 
 def test_orphaned_receipt_force_failed(identity, tmp_path):
     chain = make_chain(identity, tmp_path)
-    chain.append(ActionType.TOOL_CALL, Framework.CUSTOM)
+    chain.append(ActionType.TOOL_CALL, Framework.CUSTOM, tool_name="test_tool")
     chain.append(ActionType.LLM_INVOKE, Framework.CUSTOM)  # orphans first
     chain.finalize_last(status=ActionStatus.COMPLETED)
     receipts = chain.iter_receipts()
@@ -61,14 +61,14 @@ def test_orphaned_receipt_force_failed(identity, tmp_path):
 
 def test_first_receipt_has_null_prev_hash(identity, tmp_path):
     chain = make_chain(identity, tmp_path)
-    chain.append(ActionType.TOOL_CALL, Framework.CUSTOM)
+    chain.append(ActionType.TOOL_CALL, Framework.CUSTOM, tool_name="test_tool")
     chain.finalize_last(status=ActionStatus.COMPLETED)
     assert chain.iter_receipts()[0].prev_hash is None
 
 
 def test_second_receipt_prev_hash_links_to_first(identity, tmp_path):
     chain = make_chain(identity, tmp_path)
-    chain.append(ActionType.TOOL_CALL, Framework.CUSTOM)
+    chain.append(ActionType.TOOL_CALL, Framework.CUSTOM, tool_name="test_tool")
     chain.finalize_last(status=ActionStatus.COMPLETED)
     r1 = chain.iter_receipts()[0]
     chain.append(ActionType.LLM_INVOKE, Framework.CUSTOM)
@@ -80,7 +80,7 @@ def test_second_receipt_prev_hash_links_to_first(identity, tmp_path):
 
 def test_receipts_have_signatures(identity, tmp_path):
     chain = make_chain(identity, tmp_path)
-    chain.append(ActionType.TOOL_CALL, Framework.CUSTOM)
+    chain.append(ActionType.TOOL_CALL, Framework.CUSTOM, tool_name="test_tool")
     chain.finalize_last(status=ActionStatus.COMPLETED)
     assert chain.iter_receipts()[0].signature is not None
 
@@ -88,7 +88,7 @@ def test_receipts_have_signatures(identity, tmp_path):
 def test_verify_valid_chain(identity, tmp_path):
     chain = make_chain(identity, tmp_path)
     for _ in range(3):
-        chain.append(ActionType.TOOL_CALL, Framework.CUSTOM, payload={"n": _})
+        chain.append(ActionType.TOOL_CALL, Framework.CUSTOM, tool_name="test_tool", payload={"n": _})
         chain.finalize_last(status=ActionStatus.COMPLETED, result={"n": _})
     assert chain.verify() is True
 
@@ -99,31 +99,57 @@ def test_verify_empty_chain_raises(identity, tmp_path):
         chain.verify()
 
 
-def test_verify_detects_tampered_signature(identity, tmp_path):
+def test_iter_receipts_returns_copies(identity, tmp_path):
+    """iter_receipts() returns deep copies — mutations don't affect internal state."""
     chain = make_chain(identity, tmp_path)
-    chain.append(ActionType.TOOL_CALL, Framework.CUSTOM)
+    chain.append(ActionType.TOOL_CALL, Framework.CUSTOM, tool_name="test_tool")
     chain.finalize_last(status=ActionStatus.COMPLETED)
-    chain.iter_receipts()[0].signature = "ff" * 64
-    with pytest.raises(ChainVerificationError):
-        chain.verify()
+    copy = chain.iter_receipts()[0]
+    copy.signature = "ff" * 64
+    # Internal chain is unaffected — verify() must still pass
+    assert chain.verify() is True
 
 
-def test_verify_detects_tampered_prev_hash(identity, tmp_path):
+def test_verify_from_disk_detects_tampered_signature(identity, tmp_path):
+    """verify_from_disk() catches tampered signature in JSONL file."""
+    import json as _json
     chain = make_chain(identity, tmp_path)
-    chain.append(ActionType.TOOL_CALL, Framework.CUSTOM)
+    chain.append(ActionType.TOOL_CALL, Framework.CUSTOM, tool_name="test_tool")
+    chain.finalize_last(status=ActionStatus.COMPLETED)
+    jsonl = list(Path(tmp_path).glob("*.jsonl"))[0]
+    lines = jsonl.read_text().strip().splitlines()
+    rec = _json.loads(lines[0])
+    rec["signature"] = "ff" * 64
+    jsonl.write_text(_json.dumps(rec) + "\n")
+    ok, msg = chain.verify_from_disk()
+    assert ok is False
+    assert "signature" in msg
+
+
+def test_verify_from_disk_detects_tampered_prev_hash(identity, tmp_path):
+    """verify_from_disk() catches tampered prev_hash in JSONL file."""
+    import json as _json
+    chain = make_chain(identity, tmp_path)
+    chain.append(ActionType.TOOL_CALL, Framework.CUSTOM, tool_name="test_tool")
     chain.finalize_last(status=ActionStatus.COMPLETED)
     chain.append(ActionType.LLM_INVOKE, Framework.CUSTOM)
     chain.finalize_last(status=ActionStatus.COMPLETED)
-    chain.iter_receipts()[1].prev_hash = "00" * 32
-    with pytest.raises(ChainVerificationError):
-        chain.verify()
+    jsonl = list(Path(tmp_path).glob("*.jsonl"))[0]
+    lines = jsonl.read_text().strip().splitlines()
+    rec = _json.loads(lines[1])
+    rec["prev_hash"] = "00" * 32
+    lines[1] = _json.dumps(rec)
+    jsonl.write_text("\n".join(lines) + "\n")
+    ok, msg = chain.verify_from_disk()
+    assert ok is False
+    assert "prev_hash" in msg
 
 
 # ── JSONL persistence ─────────────────────────────────────────────────────────
 
 def test_jsonl_written_on_finalize(identity, tmp_path):
     chain = make_chain(identity, tmp_path)
-    chain.append(ActionType.TOOL_CALL, Framework.CUSTOM)
+    chain.append(ActionType.TOOL_CALL, Framework.CUSTOM, tool_name="test_tool")
     chain.finalize_last(status=ActionStatus.COMPLETED)
     files = list(Path(tmp_path).glob("*.jsonl"))
     assert len(files) == 1
@@ -135,7 +161,7 @@ def test_jsonl_written_on_finalize(identity, tmp_path):
 
 def test_jsonl_not_written_for_pending(identity, tmp_path):
     chain = make_chain(identity, tmp_path)
-    chain.append(ActionType.TOOL_CALL, Framework.CUSTOM)
+    chain.append(ActionType.TOOL_CALL, Framework.CUSTOM, tool_name="test_tool")
     files = list(Path(tmp_path).glob("*.jsonl"))
     assert len(files) == 0 or all(
         f.read_text().strip() == "" for f in files
@@ -144,7 +170,7 @@ def test_jsonl_not_written_for_pending(identity, tmp_path):
 
 def test_jsonl_prev_hash_matches_core(identity, tmp_path):
     chain = make_chain(identity, tmp_path)
-    chain.append(ActionType.TOOL_CALL, Framework.CUSTOM)
+    chain.append(ActionType.TOOL_CALL, Framework.CUSTOM, tool_name="test_tool")
     chain.finalize_last(status=ActionStatus.COMPLETED)
     chain.append(ActionType.LLM_INVOKE, Framework.CUSTOM)
     chain.finalize_last(status=ActionStatus.COMPLETED)
@@ -168,7 +194,7 @@ def test_concurrent_appends_all_finalized(identity, tmp_path):
 
     def worker(n):
         try:
-            chain.append(ActionType.TOOL_CALL, Framework.CUSTOM, payload={"n": n})
+            chain.append(ActionType.TOOL_CALL, Framework.CUSTOM, tool_name="test_tool", payload={"n": n})
             chain.finalize_last(status=ActionStatus.COMPLETED, result={"n": n})
         except Exception as e:
             errors.append(e)
@@ -186,7 +212,7 @@ def test_concurrent_appends_all_finalized(identity, tmp_path):
 
 def test_get_receipt_by_id(identity, tmp_path):
     chain = make_chain(identity, tmp_path)
-    rid = chain.append(ActionType.TOOL_CALL, Framework.CUSTOM)
+    rid = chain.append(ActionType.TOOL_CALL, Framework.CUSTOM, tool_name="test_tool")
     chain.finalize_last(status=ActionStatus.COMPLETED)
     r = chain.get_receipt(rid)
     assert r.receipt_id == rid
