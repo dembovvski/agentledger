@@ -38,6 +38,8 @@ class DenylistPolicy(ActionPolicy):
         self._denied = set(denied_tools)
 
     def evaluate(self, action_type: ActionType, tool_name: Optional[str], payload: Optional[str]) -> PolicyResult:
+        # tool_name=None cannot match any denylist entry — passes through.
+        # TOOL_CALL with no name is rejected earlier by chain.append() validation.
         if tool_name in self._denied:
             return PolicyResult(
                 verdict=PolicyVerdict.DENY,

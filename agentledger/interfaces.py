@@ -68,6 +68,9 @@ class CrossAgentRef:
 
 @dataclass
 class Receipt:
+    # Mutable by design: signature and action.status/error are set after
+    # construction during the pending→finalized transition. iter_receipts()
+    # returns deep copies so external code cannot corrupt internal chain state.
     receipt_id: str                    # UUIDv4
     chain_id: str                      # = agent_id (Ed25519 public key hex)
     timestamp: str                     # ISO8601 UTC
