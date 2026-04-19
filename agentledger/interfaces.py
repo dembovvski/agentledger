@@ -10,6 +10,7 @@ from __future__ import annotations
 import abc
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 from typing import Any, Callable, Literal, Optional
 import threading
 
@@ -299,6 +300,52 @@ class ReceiptChain(abc.ABC):
     def iter_receipts(self) -> list[Receipt]:
         """Return all receipts in order (including checkpoints stripped)."""
         ...
+
+    @abc.abstractmethod
+    def confirm_cross_ref(self, receipt_id: str) -> str:
+        """
+        Confirm a PENDING cross-agent reference on a receipt.
+
+        Finds the receipt with ``receipt_id`` whose cross_agent_ref.status is
+        PENDING, updates it to CONFIRMED, re-signs the receipt, and appends
+        a new CONFIRMED receipt entry to the chain (append-only).
+
+        Returns the receipt_id of the newly appended confirmation receipt.
+        Raises KeyError if receipt not found; ValueError if no cross_ref or
+        already CONFIRMED.
+        """
+        ...
+
+    @abc.abstractmethod
+    def resolve_cross_ref(self, ref: CrossAgentRef) -> bool:
+        """
+        Resolve a cross-agent reference: check if the referenced receipt
+        exists in the referenced agent's chain and is COMPLETED.
+
+        This is a lightweight pointer check — it does NOT verify the other
+        agent's chain signature (use verify_external_chain for full audit).
+
+        Returns True if the referenced receipt is CONFIRMED or COMPLETED.
+        Returns False if not found or if status is PENDING/FAILED/DENIED.
+        """
+        ...
+
+
+def verify_external_chain(
+    log_path: Path,
+    agent_public_key: bytes,
+    *,
+    checkpoint_only: bool = False,
+) -> tuple[bool, str]:
+    """
+    Verify a cross-agent's receipt chain from disk.
+
+    Used by an orchestrator agent to audit another agent's chain without
+    needing access to that agent's identity object.
+
+    Returns (is_valid, message).
+    """
+    ...
 
 
 class ChainVerificationError(Exception):

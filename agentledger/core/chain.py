@@ -20,6 +20,7 @@ from agentledger.interfaces import (
     ActionType,
     ChainVerificationError,
     CrossAgentRef,
+    CrossAgentRefStatus,
     Framework,
     PolicyVerdict,
     PolicyViolationError,
@@ -249,6 +250,122 @@ class ReceiptChainImpl(ReceiptChainABC):
     def iter_receipts(self) -> list[Receipt]:
         with self._lock:
             return [copy.deepcopy(r) for r in self._receipts]
+
+    # ── Cross-agent reference management ─────────────────────────────────────────
+
+    def confirm_cross_ref(self, receipt_id: str) -> str:
+        """
+        Confirm a PENDING cross-agent reference on an existing receipt.
+
+        Flow:
+        1. Find receipt with matching receipt_id
+        2. Verify it has cross_agent_ref with status=PENDING
+        3. Verify no CONFIRMATION receipt already exists for this receipt_id
+           (append-only: we cannot edit the original, so we check the chain)
+        4. Append a new receipt with ActionType=CROSS_AGENT, status=COMPLETED,
+           and cross_agent_ref pointing to the original receipt + status=CONFIRMED
+        """
+        with self._lock:
+            # Find the receipt
+            target_receipt: Optional[Receipt] = None
+            for r in self._receipts:
+                if r.receipt_id == receipt_id:
+                    target_receipt = r
+                    break
+            if target_receipt is None:
+                raise KeyError(f"Receipt {receipt_id} not found in chain")
+
+            ref = target_receipt.cross_agent_ref
+            if ref is None:
+                raise ValueError(f"Receipt {receipt_id} has no cross_agent_ref")
+            if ref.status == CrossAgentRefStatus.CONFIRMED:
+                raise ValueError(f"Cross-agent ref on {receipt_id} is already CONFIRMED")
+
+            # Check no CONFIRMATION receipt already exists for this target receipt_id
+            # (append-only: we cannot edit, so we must detect duplicates)
+            # A CONFIRMATION receipt is one with action.type == CROSS_AGENT and
+            # cross_agent_ref.ref_receipt_id pointing to the receipt being confirmed.
+            for r in self._receipts:
+                if (
+                    r.action.type == ActionType.CROSS_AGENT
+                    and r.cross_agent_ref is not None
+                    and r.cross_agent_ref.ref_receipt_id == receipt_id
+                    and r.cross_agent_ref.status == CrossAgentRefStatus.CONFIRMED
+                ):
+                    raise ValueError(f"Cross-agent ref on {receipt_id} is already CONFIRMED")
+
+            # Build new confirmation receipt (append-only)
+            # The CONFIRMATION receipt's ref_receipt_id points to the receipt
+            # being confirmed (b_receipt_id), not to the external agent's receipt.
+            # This makes duplicate detection straightforward.
+            cross_ref = CrossAgentRef(
+                target_agent_id=ref.target_agent_id,
+                ref_receipt_id=receipt_id,  # points to b_receipt_id (the one being confirmed)
+                status=CrossAgentRefStatus.CONFIRMED,
+            )
+            confirm_receipt = Receipt(
+                receipt_id=str(uuid.uuid4()),
+                chain_id=self.identity.agent_id,
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                agent_id=self.identity.agent_id,
+                principal_id=self.identity.principal_id,
+                action=ActionData(
+                    type=ActionType.CROSS_AGENT,
+                    framework=Framework.CUSTOM,
+                    status=ActionStatus.COMPLETED,
+                    payload_hash=sha256_hex(receipt_id.encode()),
+                    result_hash=None,
+                    error=None,
+                ),
+                prev_hash=self._prev_hash(),
+                cross_agent_ref=cross_ref,
+            )
+            self._sign_receipt(confirm_receipt)
+            self._receipts.append(confirm_receipt)
+            self._write_line(receipt_to_dict(confirm_receipt))
+            self._maybe_checkpoint()
+            return confirm_receipt.receipt_id
+
+    def resolve_cross_ref(self, ref: CrossAgentRef) -> bool:
+        """
+        Resolve a cross-agent reference from another agent's chain.
+
+        Reads the referenced agent's JSONL file directly from disk and checks
+        whether the referenced receipt exists and is COMPLETED or CONFIRMED.
+
+        This is a lightweight check for executor use (e.g. "did agent A
+        actually complete that tool call?"). For full tamper-evidence, use
+        verify_external_chain().
+        """
+        if ref.ref_receipt_id is None or ref.target_agent_id is None:
+            return False
+
+        # Search all JSONL files in storage_path for the referenced agent
+        log_dir = Path(self._log_path)
+        for jsonl_file in log_dir.glob("*.jsonl"):
+            # Filename format: {agent_short}_{date}_{session}.jsonl
+            # agent_short = first 8 chars of agent_id
+            if not jsonl_file.name.startswith(ref.target_agent_id[:8]):
+                continue
+
+            with jsonl_file.open(encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        obj = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    # Skip checkpoints
+                    if obj.get("checkpoint"):
+                        continue
+                    if obj.get("receipt_id") == ref.ref_receipt_id:
+                        status = obj.get("action", {}).get("status")
+                        return status in ("completed", "confirmed")
+            break  # Found the file, finished scanning
+
+        return False
 
     def verify_from_disk(self) -> tuple[bool, str]:
         """
