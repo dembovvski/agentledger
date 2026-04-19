@@ -222,3 +222,29 @@ def test_get_receipt_missing_raises(identity, tmp_path):
     chain = make_chain(identity, tmp_path)
     with pytest.raises(KeyError):
         chain.get_receipt("nonexistent")
+
+
+# ── Checkpoint integration ────────────────────────────────────────────────────
+
+def test_checkpoint_verify_from_disk_consistent(identity, tmp_path):
+    """Core checkpoint hash and CLI checkpoint_only path produce consistent results."""
+    from agentledger.cli.verify import verify_receipt_chain
+
+    chain = ReceiptChainImpl(identity, storage_path=str(tmp_path), checkpoint_interval=3)
+
+    for i in range(6):
+        chain.append(ActionType.TOOL_CALL, Framework.CUSTOM, tool_name="t", payload={"i": i})
+        chain.finalize_last(status=ActionStatus.COMPLETED, result=str(i))
+
+    # Full verify via disk
+    ok, msg = chain.verify_from_disk()
+    assert ok is True, msg
+
+    # Checkpoint-only path via CLI
+    jsonl = list(Path(tmp_path).glob("*.jsonl"))[0]
+    ok2, msg2 = verify_receipt_chain(
+        jsonl,
+        checkpoint_only=True,
+        agent_public_key=bytes.fromhex(identity.agent_id),
+    )
+    assert ok2 is True, msg2

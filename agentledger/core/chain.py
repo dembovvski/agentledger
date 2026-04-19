@@ -81,7 +81,9 @@ class ReceiptChainImpl(ReceiptChainABC):
     def _maybe_checkpoint(self) -> None:
         n = len(self._receipts)
         if n > 0 and n % self.checkpoint_interval == 0:
-            batch = self._receipts[-self.checkpoint_interval :]
+            # Cumulative hash covers ALL receipts from genesis to now,
+            # consistent with CLI which uses receipts[:receipt_count].
+            batch = self._receipts
             cumulative = sha256_hex(
                 b"".join(canonicalise_for_signing(r) for r in batch)
             )

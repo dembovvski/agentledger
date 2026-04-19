@@ -110,5 +110,7 @@ class AgentIdentityImpl(AgentIdentityABC):
         )
 
     def save(self, path: str) -> None:
+        import os
         with open(path, "w") as f:
             json.dump(self.serialize(), f, indent=2)
+        os.chmod(path, 0o600)

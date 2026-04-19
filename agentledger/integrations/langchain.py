@@ -262,7 +262,8 @@ class AgentLedgerCallback:
     ) -> None:
         """
         Called on text logs generated during execution.
-        Low-priority — records as decision with tool_name=text.
+        Immediately finalised — avoids orphaned pending receipt before
+        the next on_tool_start / on_llm_start call.
         """
         self.chain.append(
             action_type=ActionType.DECISION,
@@ -270,6 +271,7 @@ class AgentLedgerCallback:
             tool_name="text",
             payload=text,
         )
+        self.chain.finalize_last(status=ActionStatus.COMPLETED, result=text)
 
     def on_chat_model_start(
         self,
