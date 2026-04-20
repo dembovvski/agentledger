@@ -2,6 +2,8 @@
 
 **Tamper-evident audit trail and pre-execution policy enforcement for multi-agent AI systems.**
 
+[![IETF Draft](https://img.shields.io/badge/IETF-draft--dembowski--agentledger--proof--of--behavior--00-blue)](https://datatracker.ietf.org/doc/draft-dembowski-agentledger-proof-of-behavior/)
+
 ```
 $ python examples/demo.py
 
