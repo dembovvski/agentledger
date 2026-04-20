@@ -65,17 +65,17 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.command == "verify":
-        return verify.main([
-            str(args.path),
-            "--checkpoint-only" if args.checkpoint_only else "",
-            "--agent-public-key" if args.agent_public_key else "",
-            f"--agent-public-key={args.agent_public_key}" if args.agent_public_key else "",
-        ])
+        fwd = [str(args.path)]
+        if args.checkpoint_only:
+            fwd.append("--checkpoint-only")
+        if args.agent_public_key:
+            fwd += ["--agent-public-key", args.agent_public_key]
+        return verify.main(fwd)
     elif args.command == "inspect":
-        return inspect.main([
-            str(args.path),
-            "--verbose" if args.verbose else "",
-        ])
+        fwd = [str(args.path)]
+        if args.verbose:
+            fwd.append("--verbose")
+        return inspect.main(fwd)
     else:
         parser.print_help()
         return 1

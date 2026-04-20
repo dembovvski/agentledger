@@ -8,8 +8,7 @@ into typed models the API can serve directly.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
-from datetime import datetime
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
@@ -133,13 +132,10 @@ def scan_agents(storage_path: Path) -> list[AgentSummary]:
     # Group files by agent_id
     file_agent: dict[str, Path] = {}  # agent_id → latest file
     for jsonl_file in sorted(storage_path.glob("*.jsonl")):
-        rows = read_receipts(jsonl_file)
-        if rows:
-            # Use first receipt's agent context from filename prefix
-            agent_id = _extract_agent_id(jsonl_file, rows)
-            if agent_id:
-                # Keep latest file per agent (sorted glob gives oldest first)
-                file_agent[agent_id] = jsonl_file
+        agent_id = _extract_agent_id(jsonl_file)
+        if agent_id:
+            # Keep latest file per agent (sorted glob gives oldest first)
+            file_agent[agent_id] = jsonl_file
 
     summaries: list[AgentSummary] = []
     for agent_id, jsonl_file in file_agent.items():
@@ -170,8 +166,8 @@ def scan_agents(storage_path: Path) -> list[AgentSummary]:
     return sorted(summaries, key=lambda s: s.last_seen or "", reverse=True)
 
 
-def _extract_agent_id(jsonl_file: Path, rows: list[ReceiptRow]) -> Optional[str]:
-    """Extract agent_id from JSONL by reading raw chain_id field."""
+def _extract_agent_id(jsonl_file: Path) -> Optional[str]:
+    """Extract agent_id from the first non-checkpoint line in a JSONL file."""
     try:
         with jsonl_file.open(encoding="utf-8") as f:
             for line in f:

@@ -402,7 +402,7 @@ class ReceiptChainImpl(ReceiptChainABC):
                 return False
 
             status = target_obj.get("action", {}).get("status")
-            return status in ("completed", "confirmed")
+            return status == "completed"
 
         return False
 

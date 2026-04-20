@@ -279,10 +279,7 @@ class AgentLedgerCallback:
         messages: list[list[Any]],
         **kwargs: Any,
     ) -> None:
-        """
-        Called before a chat model is invoked.
-        messages: list of message lists (one per input).
-        """
+        """Called before a chat model is invoked."""
         payload = "\n".join(str(m) for batch in messages for m in batch)
         self.chain.append(
             action_type=ActionType.LLM_INVOKE,
@@ -290,3 +287,20 @@ class AgentLedgerCallback:
             tool_name="chat",
             payload=payload,
         )
+
+    def on_llm_end(
+        self,
+        response: Any,
+        **kwargs: Any,
+    ) -> None:
+        """Called when a chat model finishes — finalises the PENDING receipt."""
+        result = str(response) if response is not None else ""
+        self.chain.finalize_last(status=ActionStatus.COMPLETED, result=result)
+
+    def on_llm_error(
+        self,
+        error: BaseException,
+        **kwargs: Any,
+    ) -> None:
+        """Called when a chat model raises — finalises the PENDING receipt as FAILED."""
+        self.chain.finalize_last(status=ActionStatus.FAILED, error=str(error))

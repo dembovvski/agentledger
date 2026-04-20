@@ -32,7 +32,6 @@ from agentledger.dashboard.reader import AgentSummary, ReceiptRow, read_receipts
 
 app = FastAPI(title="AgentLedger Dashboard", docs_url=None, redoc_url=None)
 
-# Templates directory — populated by Hermes's frontend work
 _TEMPLATES_DIR = Path(__file__).parent / "templates"
 templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
 

@@ -8,10 +8,10 @@ Wszystkie kontrakty muszą być stabilne przed rozpoczęciem kodowania.
 from __future__ import annotations
 
 import abc
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Literal, Optional
+from typing import Any, Optional
 import threading
 
 
@@ -84,12 +84,9 @@ class Receipt:
     schema_version: str = "0.1"
 
     def to_dict(self) -> dict[str, Any]:
-        """Serialise to canonical dict (keys sorted lexicographically).
-
-        NOTE: signature excluded when computing signing payload — use
-        canonicalise_for_signing() for hash computation.
-        """
-        raise NotImplementedError
+        """Serialise to canonical dict. Delegates to core/receipt.py:receipt_to_dict()."""
+        from agentledger.core.receipt import receipt_to_dict
+        return receipt_to_dict(self)
 
 
 @dataclass
@@ -346,7 +343,12 @@ def verify_external_chain(
 
     Returns (is_valid, message).
     """
-    ...
+    from agentledger.cli.verify import verify_receipt_chain
+    return verify_receipt_chain(
+        log_path,
+        agent_public_key=agent_public_key,
+        checkpoint_only=checkpoint_only,
+    )
 
 
 class ChainVerificationError(Exception):
