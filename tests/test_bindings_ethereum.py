@@ -85,11 +85,13 @@ class TestEthereumBindingVerify:
     def test_verify_wrong_length_signature_returns_false(self):
         """Signature of wrong length is rejected without exception."""
         binding = EthereumBinding(private_key=ETH_PRIVKEY)
+        assert binding.address is not None
         assert binding.verify(AGENT_PUBKEY, binding.address, b"too-short") is False
 
     def test_verify_readonly_binding_works(self):
         """Read-only binding can verify without a private key."""
         signer = EthereumBinding(private_key=ETH_PRIVKEY)
+        assert signer.address is not None
         sig = signer.bind(AGENT_PUBKEY, signer.address)
         readonly = EthereumBinding(private_key=None)
         assert readonly.verify(AGENT_PUBKEY, signer.address, sig) is True
