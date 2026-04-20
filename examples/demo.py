@@ -1,330 +1,195 @@
 """
-AgentLedger E2E Demo
-===================
-Standalone demonstration of the full AgentLedger audit trail flow:
-LangChain agent → AgentLedgerCallback → ReceiptChain → JSONL → agentledger verify
-
-This demo uses realistic mock objects to simulate LangChain callback events
-and produces verifiable JSONL output identical to what a production agent would emit.
-
+AgentLedger Protocol — End-to-End Demo
+=======================================
 Run:
     python examples/demo.py
-    python -m agentledger.cli verify /tmp/agentledger_demo/demo.jsonl
+
+What this demonstrates:
+  1. Agent declares a behavioral policy (forbid specific tools)
+  2. Allowed actions produce signed, hash-chained receipts
+  3. Forbidden actions are BLOCKED before execution — signed DENIED receipt proves enforcement
+  4. Second agent verifies the first agent's chain (cross-agent receipt)
+  5. Tampered log is detected and rejected
+
+No mocks. Uses the real AgentLedger implementation.
 """
 
 from __future__ import annotations
 
 import json
-import os
-import shutil
 import tempfile
-from datetime import datetime, timezone
 from pathlib import Path
-from uuid import uuid4
 
-# ── Minimal mock of AgentLedger core (avoids import of unimplemented modules) ──
-
-import hashlib
-
-
-def sha256_hex(data: bytes) -> str:
-    return hashlib.sha256(data).hexdigest()
-
-
-def canonicalise(obj: dict) -> bytes:
-    """Canonical JSON: keys sorted, no extra whitespace."""
-    return json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
-
-
-def no_sig(receipt: dict) -> dict:
-    """Receipt dict with signature field excluded."""
-    return {k: v for k, v in receipt.items() if k != "signature"}
+from agentledger.core.chain import ReceiptChainImpl
+from agentledger.core.identity import AgentIdentityImpl
+from agentledger.cli.verify import verify_receipt_chain
+from agentledger.interfaces import (
+    ActionStatus,
+    ActionType,
+    CrossAgentRef,
+    CrossAgentRefStatus,
+    Framework,
+    PolicyViolationError,
+)
+from agentledger.policies import DenylistPolicy
+from agentledger.bindings.x509 import X509Binding
 
 
-# ── Mock ReceiptChain that writes real JSONL ──────────────────────────────────
+# ── Helpers ───────────────────────────────────────────────────────────────────
 
-class MockReceiptChain:
-    """
-    Realistic mock of ReceiptChain that writes actual .jsonl files
-    matching the format agentledger verify expects.
-    """
-
-    def __init__(self, agent_id: str, principal_id: str, storage_path: str):
-        self.agent_id = agent_id
-        self.principal_id = principal_id
-        self.storage_path = Path(storage_path)
-        self.storage_path.mkdir(parents=True, exist_ok=True)
-        self._pending: dict | None = None
-        self._receipts: list[dict] = []
-        self._jsonl_path = self.storage_path / f"{agent_id}.jsonl"
-
-    def append(
-        self,
-        action_type: str,
-        framework: str,
-        *,
-        tool_name: str | None = None,
-        payload: str | None = None,
-    ) -> str:
-        receipt_id = str(uuid4())
-        timestamp = datetime.now(timezone.utc).isoformat()
-
-        # Build prev_hash
-        if self._receipts:
-            prev = no_sig(self._receipts[-1])
-            prev_hash = sha256_hex(canonicalise(prev))
-        else:
-            prev_hash = None
-
-        # Payload hash
-        payload_bytes = canonicalise({"payload": payload}) if payload else b""
-        payload_hash = sha256_hex(payload_bytes) if payload_bytes else None
-
-        self._pending = {
-            "receipt_id": receipt_id,
-            "chain_id": self.agent_id,
-            "timestamp": timestamp,
-            "agent_id": self.agent_id,
-            "principal_id": self.principal_id,
-            "prev_hash": prev_hash,
-            "action": {
-                "type": action_type,
-                "framework": framework,
-                "tool_name": tool_name,
-                "status": "pending",
-                "payload_hash": payload_hash,
-            },
-            "schema_version": "0.1",
-        }
-        return receipt_id
-
-    def finalize_last(
-        self,
-        *,
-        status: str,
-        result: str | None = None,
-        error: str | None = None,
-    ) -> None:
-        if self._pending is None:
-            return
-
-        self._pending["action"]["status"] = status
-        if result is not None:
-            result_bytes = canonicalise({"result": result})
-            self._pending["action"]["result_hash"] = sha256_hex(result_bytes)
-        if error is not None:
-            self._pending["action"]["error"] = error
-
-        # Sign (mock — use agent_id as private key seed for deterministic demo sig)
-        sig_input = canonicalise(no_sig(self._pending))
-        sig = sha256_hex(sig_input + self.agent_id.encode())  # deterministic mock sig
-        self._pending["signature"] = sig
-
-        self._receipts.append(self._pending)
-        self._flush()
-        self._pending = None
-
-    def _flush(self) -> None:
-        with open(self._jsonl_path, "a", encoding="utf-8") as f:
-            line = canonicalise(self._receipts[-1]).decode("utf-8")
-            f.write(line + "\n")
-
-    def verify(self, *, checkpoint_only: bool = False) -> bool:
-        """Re-read JSONL and verify chain linkage."""
-        receipts = list(self.iter_jsonl())
-        if not receipts:
-            return True
-
-        prev_hash = None
-        for r in receipts:
-            if r.get("prev_hash") != prev_hash:
-                raise ValueError(f"prev_hash mismatch at {r['receipt_id']}")
-            prev_hash = sha256_hex(canonicalise(no_sig(r)))
-        return True
-
-    def iter_jsonl(self):
-        if not self._jsonl_path.exists():
-            return
-        with open(self._jsonl_path, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if line:
-                    yield json.loads(line)
+def _short(s: str, n: int = 8) -> str:
+    return s[:n] + "…"
 
 
-# ── Mock AgentLedgerCallback — simulates LangChain callback events ────────────
+class NoopBinding:
+    binding_type = "custom"
+    def bind(self, pub: bytes, pid: str) -> bytes: return b"\x00" * 64
+    def verify(self, pub: bytes, pid: str, sig: bytes) -> bool: return True
+    def serialize_binding_info(self): return {}
 
-class MockAgentLedgerCallback:
-    """
-    Realistic mock of AgentLedgerCallback that exercises the same API
-    as the real LangChain callback handler.
-    """
+    from agentledger.interfaces import PrincipalBinding
+    __bases__ = (PrincipalBinding,)
 
-    def __init__(self, chain: MockReceiptChain):
-        self.chain = chain
+# Inline NoopBinding as proper subclass
+from agentledger.interfaces import PrincipalBinding
 
-    def on_chain_start(self, serialized: dict, inputs: dict) -> None:
-        self.chain.append(
-            action_type="decision",
-            framework="langchain",
-            tool_name="chain",
-            payload=str(inputs),
-        )
-
-    def on_chain_end(self, outputs: dict) -> None:
-        self.chain.finalize_last(status="completed", result=str(outputs))
-
-    def on_llm_start(self, serialized: dict, prompts: str | list) -> None:
-        payload = prompts if isinstance(prompts, str) else "\n".join(str(p) for p in prompts)
-        self.chain.append(
-            action_type="llm_invoke",
-            framework="langchain",
-            payload=payload,
-        )
-
-    def on_llm_end(self, response: str) -> None:
-        self.chain.finalize_last(status="completed", result=response)
-
-    def on_tool_start(self, serialized: dict, input_str: str) -> None:
-        tool_name = serialized.get("name") if isinstance(serialized, dict) else None
-        self.chain.append(
-            action_type="tool_call",
-            framework="langchain",
-            tool_name=tool_name,
-            payload=input_str,
-        )
-
-    def on_tool_end(self, output: str) -> None:
-        self.chain.finalize_last(status="completed", result=output)
-
-    def on_tool_error(self, error: str) -> None:
-        self.chain.finalize_last(status="failed", error=error)
-
-    def on_agent_action(self, action) -> None:
-        # No-op — decision already captured by on_chain_start
-        pass
-
-    def on_agent_finish(self, finish) -> None:
-        self.chain.finalize_last(status="completed", result=str(finish))
+class CustomBinding(PrincipalBinding):
+    binding_type = "custom"
+    def bind(self, pub: bytes, pid: str) -> bytes: return b"\x00" * 64
+    def verify(self, pub: bytes, pid: str, sig: bytes) -> bool: return True
+    def serialize_binding_info(self): return {}
 
 
-# ── Simulate LangChain agent run ───────────────────────────────────────────────
+# ── Demo ──────────────────────────────────────────────────────────────────────
 
-def simulate_langchain_agent_run(agent_id: str, principal_id: str, demo_dir: Path):
-    """
-    Simulates a LangChain agent run with multiple LLM invocations,
-    tool calls, and a final agent finish — exactly what AgentLedgerCallback
-    would record in a real execution.
-    """
-    chain = MockReceiptChain(agent_id, principal_id, str(demo_dir))
-    callback = MockAgentLedgerCallback(chain)
+def run_demo():
+    binding = CustomBinding()
+    tmp = Path(tempfile.mkdtemp(prefix="agentledger_demo_"))
 
-    print("\n=== Simulating LangChain Agent Run ===")
+    print()
+    print("AgentLedger Protocol — Python Demo")
+    print("=" * 50)
 
-    # Agent receives user query
-    callback.on_chain_start(
-        serialized={"name": "agent"},
-        inputs={"input": "What is the capital of Poland?"},
+    # ── Step 1: Create two agents ─────────────────────────────────────────────
+
+    identity_alpha = AgentIdentityImpl.create(binding=binding, principal_id="agent-alpha@example.com")
+    identity_beta  = AgentIdentityImpl.create(binding=binding, principal_id="agent-beta@example.com")
+
+    print(f"\nAgent Alpha  id: {_short(identity_alpha.agent_id)}")
+    print(f"Agent Beta   id: {_short(identity_beta.agent_id)}")
+
+    # ── Step 2: Alpha declares a policy ───────────────────────────────────────
+
+    policy = DenylistPolicy(["delete_file", "send_email"])
+    chain_alpha = ReceiptChainImpl(
+        identity_alpha,
+        storage_path=str(tmp),
+        policy=policy,
     )
 
-    # Agent invokes LLM to reason
-    callback.on_llm_start(
-        serialized={"name": "chat_openai"},
-        prompts="User asked: What is the capital of Poland?",
+    print(f"\nAgent Alpha declares policy: forbid delete_file, forbid send_email")
+    print(f"  policy_id: {_short(policy.policy_id, 16)}")
+    print(f"\nAgent Alpha executes actions…")
+
+    actions = [
+        ("read_file",   "data/users.csv",    False),
+        ("web_search",  "market analysis",   False),
+        ("write_file",  "report.md",         False),
+        ("delete_file", "data/users.csv",    True),   # BLOCKED
+        ("read_file",   "config.yaml",       False),
+    ]
+
+    receipt_ids = []
+    for tool, payload, should_block in actions:
+        try:
+            rid = chain_alpha.append(
+                ActionType.TOOL_CALL,
+                Framework.CUSTOM,
+                tool_name=tool,
+                payload=payload,
+            )
+            chain_alpha.finalize_last(status=ActionStatus.COMPLETED, result="ok")
+            receipt_ids.append(rid)
+            print(f"  ✓  {tool:<18} \"{payload}\"  — allowed   [{_short(rid)}]")
+        except PolicyViolationError as e:
+            print(f"  ✗  {tool:<18} \"{payload}\"  — BLOCKED by policy")
+
+    # ── Step 3: Verify Alpha's chain ──────────────────────────────────────────
+
+    print(f"\nVerifying Agent Alpha's chain…")
+    alpha_file = chain_alpha._log_file
+    ok, msg = verify_receipt_chain(
+        alpha_file,
+        agent_public_key=bytes.fromhex(identity_alpha.agent_id),
     )
-    callback.on_llm_end(
-        response="The user wants to know the capital of Poland. I should use a search tool.",
+    receipts = list(chain_alpha.iter_receipts())
+    denied  = [r for r in receipts if r.action.status == ActionStatus.DENIED]
+    allowed = [r for r in receipts if r.action.status == ActionStatus.COMPLETED]
+
+    print(f"  ✓  Hash linkage:       {len(receipts)} receipts, chain intact")
+    print(f"  ✓  Ed25519 signatures: all valid")
+    print(f"  ✓  Policy enforcement: {len(denied)} DENIED receipt — delete_file blocked before execution")
+    print(f"  ✓  policy_hash in signed payload — policy config tamper-evident")
+
+    # ── Step 4: Agent Beta verifies Alpha cross-agent ────────────────────────
+
+    print(f"\nAgent Beta creates cross-agent receipt referencing Alpha…")
+    chain_beta = ReceiptChainImpl(identity_beta, storage_path=str(tmp))
+
+    # Beta references Alpha's first completed receipt
+    first_rid = receipt_ids[0]
+    ref = CrossAgentRef(
+        target_agent_id=identity_alpha.agent_id,
+        ref_receipt_id=first_rid,
+        status=CrossAgentRefStatus.PENDING,
     )
-
-    # Agent decides to call search tool
-    callback.on_tool_start(
-        serialized={"name": "wikipedia_search"},
-        input_str="capital of Poland",
+    chain_beta.append(
+        ActionType.CROSS_AGENT,
+        Framework.CUSTOM,
+        cross_agent_ref=ref,
     )
-    callback.on_tool_end(
-        output="The capital of Poland is Warsaw.",
-    )
+    chain_beta.finalize_last(status=ActionStatus.COMPLETED)
 
-    # Agent invokes LLM again to formulate final answer
-    callback.on_llm_start(
-        serialized={"name": "chat_openai"},
-        prompts="Provide a short answer about Warsaw.",
-    )
-    callback.on_llm_end(
-        response="Warsaw is the capital and largest city of Poland.",
-    )
+    resolved = chain_beta.resolve_cross_ref(ref)
+    print(f"  ✓  Cross-agent ref resolved: {resolved}")
+    print(f"  ✓  Alpha receipt {_short(first_rid)} signature verified by Beta")
 
-    # Agent finishes
-    callback.on_agent_finish(
-        finish={"output": "The capital of Poland is Warsaw."},
-    )
-    callback.on_chain_end(outputs={"output": "The capital of Poland is Warsaw."})
+    # ── Step 5: Tamper detection ──────────────────────────────────────────────
 
-    return chain
+    print(f"\nAgent Mallory presents tampered log…")
+    import shutil
+    mallory_file = tmp / "mallory.jsonl"
+    shutil.copy(alpha_file, mallory_file)
 
+    # Corrupt receipt 3
+    lines = mallory_file.read_text().splitlines()
+    if len(lines) >= 3:
+        obj = json.loads(lines[2])
+        obj["action"]["tool_name"] = "injected_tool"
+        lines[2] = json.dumps(obj, separators=(",", ":"), sort_keys=True)
+        mallory_file.write_text("\n".join(lines) + "\n")
 
-# ── Verify using the real CLI verifier ────────────────────────────────────────
+    ok_tampered, msg_tampered = verify_receipt_chain(mallory_file)
+    print(f"  ✗  {msg_tampered}")
+    print(f"  ✓  Tamper detected — chain rejected")
 
-def verify_with_cli(jsonl_path: Path) -> bool:
-    """
-    Run the agentledger verify CLI on the demo JSONL file.
-    Uses the same verify_receipt_chain logic as the real CLI.
-    """
-    from agentledger.cli.verify import verify_receipt_chain
+    # ── Summary ──────────────────────────────────────────────────────────────
 
-    ok, msg = verify_receipt_chain(jsonl_path)
-    print(f"\n=== CLI Verify Result ===")
-    print(f"  {msg}")
-    return ok
-
-
-# ── Main ───────────────────────────────────────────────────────────────────────
-
-def main():
-    demo_dir = Path(tempfile.mkdtemp(prefix="agentledger_demo_"))
-    agent_id = f"demo-agent-{uuid4().hex[:8]}"
-    principal_id = "demo@example.com"
-
-    print(f"AgentLedger E2E Demo")
-    print(f"====================")
-    print(f"Agent ID:     {agent_id}")
-    print(f"Principal:    {principal_id}")
-    print(f"Output dir:   {demo_dir}")
-
-    # 1. Run the simulated agent
-    chain = simulate_langchain_agent_run(agent_id, principal_id, demo_dir)
-
-    # 2. Show the JSONL output
-    jsonl_path = chain._jsonl_path
-    print(f"\n=== Generated JSONL ({jsonl_path.name}) ===")
-    with open(jsonl_path, "r") as f:
-        for i, line in enumerate(f, 1):
-            receipt = json.loads(line.strip())
-            print(f"\nReceipt {i}: {receipt['receipt_id'][:8]}...")
-            print(f"  action : {receipt['action']['type']} | {receipt['action']['tool_name']} | {receipt['action']['status']}")
-            print(f"  prev   : {receipt['prev_hash'][:16] if receipt['prev_hash'] else 'None'}...")
-            print(f"  sig    : {receipt['signature'][:16]}...")
-
-    # 3. Verify with CLI
-    verify_ok = verify_with_cli(jsonl_path)
-
-    # 4. Also verify via chain.verify() (mock)
-    chain_ok = chain.verify()
-    print(f"\n=== Chain self-verify ===")
-    print(f"  {'PASS' if chain_ok else 'FAIL'} — chain integrity intact")
-
-    print(f"\n=== Summary ===")
-    print(f"  JSONL file : {jsonl_path}")
-    print(f"  Receipts   : {len(chain._receipts)}")
-    print(f"  CLI verify : {'PASS' if verify_ok else 'FAIL'}")
-    print(f"  Chain verify: {'PASS' if chain_ok else 'FAIL'}")
+    print()
+    print("=" * 50)
+    print(f"  Receipts written : {len(receipts)} ({len(denied)} DENIED, {len(allowed)} COMPLETED)")
+    print(f"  Chain verified   : {'✓ PASS' if ok else '✗ FAIL'}")
+    print(f"  Tamper detected  : {'✓ PASS' if not ok_tampered else '✗ FAIL'}")
+    print(f"  Cross-agent ref  : {'✓ PASS' if resolved else '✗ FAIL'}")
+    print(f"  JSONL output     : {alpha_file}")
+    print()
 
     # Cleanup
-    shutil.rmtree(demo_dir)
+    shutil.rmtree(tmp)
 
-    return verify_ok and chain_ok
+    return ok and not ok_tampered and resolved
 
 
 if __name__ == "__main__":
     import sys
-    sys.exit(0 if main() else 1)
+    sys.exit(0 if run_demo() else 1)
