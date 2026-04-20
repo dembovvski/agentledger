@@ -86,6 +86,7 @@ def test_read_receipts_cross_ref_populated(tmp_path):
     jsonl = list(tmp_path.glob("*.jsonl"))[0]
     rows = read_receipts(jsonl)
     assert rows[0].has_cross_ref is True
+    assert rows[0].cross_agent_ref is not None
     assert rows[0].cross_agent_ref["ref_receipt_id"] == "ref-123"
 
 

@@ -88,7 +88,7 @@ class AgentLedgerAutoGenHook:
         Wraps each function in agent.function_map so tool calls are recorded.
         Skips agents that have no function_map.
         """
-        function_map: dict[str, Any] = getattr(agent, "function_map", None)
+        function_map: dict[str, Any] | None = getattr(agent, "function_map", None)
         if not function_map:
             return
 
@@ -131,7 +131,7 @@ class AgentLedgerAutoGenHook:
         Restore original function_map entries (unwrap).
         Hook deregistration is not supported by AutoGen — hooks remain.
         """
-        function_map: dict[str, Any] = getattr(agent, "function_map", None)
+        function_map: dict[str, Any] | None = getattr(agent, "function_map", None)
         if function_map:
             for name, original in self._wrapped_functions.items():
                 if name in function_map:
