@@ -17,11 +17,6 @@ author:
 normative:
   RFC8259:   # JSON
   RFC8032:   # Ed25519
-  RFC4648:   # Base16/Base64
-
-informative:
-  RFC9052:   # COSE (reference)
-  RFC3161:   # Timestamping
 
 --- abstract
 
@@ -400,4 +395,6 @@ The following table summarizes all receipt fields.
 A reference implementation in Python (MIT licensed) is available at:
 https://github.com/dembovvski/agentledger
 
-The implementation covers: AgentIdentityImpl (Ed25519), ReceiptChainImpl (JSONL storage, checkpoint hashes), DenylistPolicy/AllowlistPolicy/CompositePolicy, integrations for LangChain/AutoGen/CrewAI, CLI verifier.
+The implementation covers: AgentIdentityImpl (Ed25519), ReceiptChainImpl
+(JSONL storage, checkpoint hashes), DenylistPolicy/AllowlistPolicy/
+CompositePolicy, integrations for LangChain/AutoGen/CrewAI, CLI verifier.
