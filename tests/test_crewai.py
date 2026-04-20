@@ -130,6 +130,7 @@ def test_crewai_wrap_tool_failure(tmp_path):
     receipts = chain.iter_receipts()
     assert len(receipts) == 1
     assert receipts[0].action.status == ActionStatus.FAILED
+    assert receipts[0].action.error is not None
     assert "rate limit exceeded" in receipts[0].action.error
 
 

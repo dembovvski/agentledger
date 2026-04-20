@@ -54,6 +54,7 @@ def test_orphaned_receipt_force_failed(identity, tmp_path):
     chain.finalize_last(status=ActionStatus.COMPLETED)
     receipts = chain.iter_receipts()
     assert receipts[0].action.status == ActionStatus.FAILED
+    assert receipts[0].action.error is not None
     assert "orphaned" in receipts[0].action.error
 
 

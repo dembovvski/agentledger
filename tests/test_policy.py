@@ -47,6 +47,7 @@ def test_denylist_records_denied_receipt(tmp_path):
     assert len(receipts) == 1
     assert receipts[0].action.status == ActionStatus.DENIED
     assert receipts[0].action.tool_name == "rm_rf"
+    assert receipts[0].action.error is not None
     assert "policy:denied" in receipts[0].action.error
 
 

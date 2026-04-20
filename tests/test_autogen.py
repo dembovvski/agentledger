@@ -109,6 +109,7 @@ def test_autogen_tool_failure_recorded(tmp_path):
     receipts = chain.iter_receipts()
     assert len(receipts) == 1
     assert receipts[0].action.status == ActionStatus.FAILED
+    assert receipts[0].action.error is not None
     assert "API timeout" in receipts[0].action.error
 
 

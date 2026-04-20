@@ -23,6 +23,7 @@ class TestEthereumBindingBind:
     def test_bind_returns_65_bytes(self):
         """Signature must be 65 bytes (r=32 + s=32 + v=1)."""
         binding = EthereumBinding(private_key=ETH_PRIVKEY)
+        assert binding.address is not None
         sig = binding.bind(AGENT_PUBKEY, binding.address)
         assert isinstance(sig, bytes)
         assert len(sig) == 65
@@ -30,6 +31,7 @@ class TestEthereumBindingBind:
     def test_bind_message_is_agent_pubkey_hex(self):
         """bind() signs the Ed25519 pubkey as a hex string (EIP-191 prefixed)."""
         binding = EthereumBinding(private_key=ETH_PRIVKEY)
+        assert binding.address is not None
         sig = binding.bind(AGENT_PUBKEY, binding.address)
         assert len(sig) == 65
 
@@ -53,18 +55,21 @@ class TestEthereumBindingVerify:
     def test_verify_valid_signature(self):
         """Valid signature returns True."""
         binding = EthereumBinding(private_key=ETH_PRIVKEY)
+        assert binding.address is not None
         sig = binding.bind(AGENT_PUBKEY, binding.address)
         assert binding.verify(AGENT_PUBKEY, binding.address, sig) is True
 
     def test_verify_wrong_address_returns_false(self):
         """Signature for a different address returns False."""
         binding = EthereumBinding(private_key=ETH_PRIVKEY)
+        assert binding.address is not None
         sig = binding.bind(AGENT_PUBKEY, binding.address)
         assert binding.verify(AGENT_PUBKEY, "0x0000000000000000000000000000000000000001", sig) is False
 
     def test_verify_wrong_pubkey_returns_false(self):
         """Signature over a different pubkey returns False."""
         binding = EthereumBinding(private_key=ETH_PRIVKEY)
+        assert binding.address is not None
         sig = binding.bind(AGENT_PUBKEY, binding.address)
         other_pubkey = bytes.fromhex("00" * 32)
         assert binding.verify(other_pubkey, binding.address, sig) is False
@@ -72,6 +77,7 @@ class TestEthereumBindingVerify:
     def test_verify_tampered_signature_returns_false(self):
         """Modified signature bytes return False, not an exception."""
         binding = EthereumBinding(private_key=ETH_PRIVKEY)
+        assert binding.address is not None
         sig = bytearray(binding.bind(AGENT_PUBKEY, binding.address))
         sig[0] ^= 0xFF
         assert binding.verify(AGENT_PUBKEY, binding.address, bytes(sig)) is False

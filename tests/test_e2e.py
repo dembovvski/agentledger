@@ -149,6 +149,7 @@ def test_e2e_tool_failure_recorded(tmp_path):
     assert len(failed) == 2  # orphaned chain + failed tool
     tool_failed = [r for r in failed if r.action.tool_name == "http_get"]
     assert len(tool_failed) == 1
+    assert tool_failed[0].action.error is not None
     assert "Connection timed out" in tool_failed[0].action.error
 
     assert chain.verify() is True
