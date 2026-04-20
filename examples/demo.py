@@ -129,7 +129,7 @@ def run_demo():
     print(f"  ✓  Hash linkage:       {len(receipts)} receipts, chain intact")
     print(f"  ✓  Ed25519 signatures: all valid")
     print(f"  ✓  Policy enforcement: {len(denied)} DENIED receipt — delete_file blocked before execution")
-    print(f"  ✓  policy_hash in signed payload — policy config tamper-evident")
+    print(f"  ✓  policy_attestation in signed payload — RFC 8785 JCS digest, policy swap breaks signatures")
 
     # ── Step 4: Agent Beta verifies Alpha cross-agent ────────────────────────
 

@@ -2,7 +2,7 @@
 Tests verifying security fixes from the v0.4 audit.
 
 Covers:
-  - policy_hash in signed receipt payload (willamhou RFC comment)
+  - policy_attestation in signed receipt payload (RFC 8785 JCS, willamhou draft)
   - get_receipt() returns deep copy, not live reference
   - resolve_cross_ref() verifies Ed25519 signature on referenced receipt
   - AgentIdentityImpl.save_private_key() + load() key persistence
@@ -46,7 +46,7 @@ def make_chain(identity, tmp_path, policy=None):
     return ReceiptChainImpl(identity, storage_path=str(tmp_path), policy=policy)
 
 
-# ── policy_hash in signed payload ─────────────────────────────────────────────
+# ── policy_attestation in signed payload ──────────────────────────────────────
 
 def test_policy_attestation_present_in_allowed_receipt(identity, tmp_path):
     policy = DenylistPolicy(["rm_rf"])

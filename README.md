@@ -4,7 +4,7 @@
 
 [![IETF Draft](https://img.shields.io/badge/IETF-draft--dembowski--agentledger--proof--of--behavior--00-blue)](https://datatracker.ietf.org/doc/draft-dembowski-agentledger-proof-of-behavior/)
 
-```
+```text
 $ python examples/demo.py
 
 AgentLedger Protocol — Python Demo
@@ -26,7 +26,7 @@ Verifying Agent Alpha's chain…
   ✓  Hash linkage:       5 receipts, chain intact
   ✓  Ed25519 signatures: all valid
   ✓  Policy enforcement: 1 DENIED receipt — delete_file blocked before execution
-  ✓  policy_hash in signed payload — policy config tamper-evident
+  ✓  policy_attestation in signed payload — RFC 8785 JCS digest, policy swap breaks signatures
 
 Agent Beta creates cross-agent receipt referencing Alpha…
   ✓  Cross-agent ref resolved: True
@@ -195,13 +195,16 @@ Every receipt is a signed JSON object, hash-chained to the previous one.
     "status": "completed",
     "payload_hash": "sha256-of-input",
     "result_hash": "sha256-of-output",
-    "policy_hash": "sha256-of-policy-config"
+    "policy_attestation": {
+      "policy_digest": "sha256:<hex>",
+      "policy_decision": "permit"
+    }
   },
   "signature": "ed25519-signature-hex"
 }
 ```
 
-The `signature` covers everything except itself — keys sorted, no whitespace (JCS-compatible). `policy_hash` is inside the signed payload: swapping policy config breaks all signatures.
+The `signature` covers everything except itself — keys sorted, no whitespace (RFC 8785 JCS). `policy_attestation` is inside the signed payload: swapping policy config breaks all signatures.
 
 ---
 
@@ -222,16 +225,17 @@ agentledger inspect ./receipts/agent_20260420.jsonl --verbose
 
 ## Security Properties
 
-| Property | Mechanism |
-|----------|-----------|
-| Tamper evidence | SHA-256 hash chain — any modification breaks all subsequent links |
-| Non-repudiation | Ed25519 signature per receipt — proves agent identity |
-| Pre-execution enforcement | DENIED receipt written before `PolicyViolationError` raised |
-| Policy binding | `policy_hash` in signed payload — policy swap breaks signatures |
-| External observer | Callback registered outside agent code — agent cannot suppress |
-| Key persistence | `save_private_key()` + `load()` — survives process restarts |
+| Property                  | Mechanism                                                                  |
+|---------------------------|----------------------------------------------------------------------------|
+| Tamper evidence           | SHA-256 hash chain — any modification breaks all subsequent links          |
+| Non-repudiation           | Ed25519 signature per receipt — proves agent identity                      |
+| Pre-execution enforcement | DENIED receipt written before `PolicyViolationError` raised                |
+| Policy binding            | `policy_attestation` (RFC 8785 JCS digest) — policy swap breaks signatures |
+| External observer         | Callback registered outside agent code — agent cannot suppress             |
+| Key persistence           | `save_private_key()` + `load()` — survives process restarts                |
 
 **Known limitations:**
+
 - No key revocation — compromised keys remain trusted until replaced out-of-band
 - `verify()` checks in-memory state only — use `verify_from_disk()` for tamper detection
 - Single-operator deployments: operator with write access can rewrite the JSONL; mitigate with external checkpointing or bilateral signing
