@@ -134,10 +134,14 @@ def receipt_detail_page(request: Request, receipt_id: str):
     if receipt_row is None:
         raise HTTPException(status_code=404, detail=f"Receipt {receipt_id} not found")
 
-    # Verify chain
+    # Verify chain — use agent's public key (= agent_id hex) for full Ed25519 verification
     from agentledger.cli.verify import verify_receipt_chain
     if jsonl_path:
-        ok, msg = verify_receipt_chain(jsonl_path, agent_public_key=None)
+        try:
+            pub_key = bytes.fromhex(receipt_row.agent_id) if receipt_row.agent_id else None
+        except ValueError:
+            pub_key = None
+        ok, msg = verify_receipt_chain(jsonl_path, agent_public_key=pub_key)
         verify_result = {"valid": ok, "message": msg}
     else:
         verify_result = {"valid": False, "message": "Chain file not found"}

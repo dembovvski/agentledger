@@ -119,6 +119,7 @@ class ReceiptChainImpl(ReceiptChainABC):
                 tool_name=tool_name,
                 status=ActionStatus.DENIED,
                 error=f"policy:denied — {reason}",
+                policy_hash=self._policy.policy_id if self._policy is not None else None,
             ),
             prev_hash=self._prev_hash(),
         )
@@ -178,6 +179,7 @@ class ReceiptChainImpl(ReceiptChainABC):
                     tool_name=tool_name,
                     status=ActionStatus.PENDING,
                     payload_hash=payload_hash,
+                    policy_hash=self._policy.policy_id if self._policy is not None else None,
                 ),
                 prev_hash=self._prev_hash(),
                 cross_agent_ref=cross_agent_ref,
@@ -212,6 +214,15 @@ class ReceiptChainImpl(ReceiptChainABC):
     # ── Verification ──────────────────────────────────────────────────────────
 
     def verify(self, *, checkpoint_only: bool = False) -> bool:
+        """
+        Verify in-memory chain integrity (hash linkage + Ed25519 signatures).
+
+        IMPORTANT: This method checks only the in-memory receipt list — it does
+        NOT read from disk. An attacker with write access to the JSONL file can
+        rewrite it without this method detecting the change. Use verify_from_disk()
+        for tamper detection of the persisted chain, or run:
+            agentledger verify <path> --agent-public-key <hex>
+        """
         with self._lock:
             receipts = list(self._receipts)
 
@@ -244,7 +255,7 @@ class ReceiptChainImpl(ReceiptChainABC):
         with self._lock:
             for r in self._receipts:
                 if r.receipt_id == receipt_id:
-                    return r
+                    return copy.deepcopy(r)
         raise KeyError(receipt_id)
 
     def iter_receipts(self) -> list[Receipt]:
@@ -330,23 +341,30 @@ class ReceiptChainImpl(ReceiptChainABC):
         """
         Resolve a cross-agent reference from another agent's chain.
 
-        Reads the referenced agent's JSONL file directly from disk and checks
-        whether the referenced receipt exists and is COMPLETED or CONFIRMED.
+        Reads the referenced agent's JSONL file directly from disk, verifies
+        the Ed25519 signature on the specific receipt, and checks whether it
+        is COMPLETED or CONFIRMED.
 
-        This is a lightweight check for executor use (e.g. "did agent A
-        actually complete that tool call?"). For full tamper-evidence, use
-        verify_external_chain().
+        target_agent_id is the Ed25519 public key hex of the referenced agent,
+        used for signature verification — ensuring the receipt cannot be forged.
         """
         if ref.ref_receipt_id is None or ref.target_agent_id is None:
             return False
 
-        # Search all JSONL files in storage_path for the referenced agent
+        try:
+            target_pub_bytes = bytes.fromhex(ref.target_agent_id)
+        except ValueError:
+            return False
+
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+        from cryptography.exceptions import InvalidSignature
+        from agentledger.cli.verify import canonicalise
+
         log_dir = Path(self._log_path)
         for jsonl_file in log_dir.glob("*.jsonl"):
-            # Filename format: {agent_short}_{date}_{session}.jsonl
-            # agent_short = first 8 chars of agent_id
-            if not jsonl_file.name.startswith(ref.target_agent_id[:8]):
-                continue
+            # Match by scanning file content — avoids 8-char prefix collisions
+            found_agent = False
+            target_obj: Optional[dict] = None
 
             with jsonl_file.open(encoding="utf-8") as f:
                 for line in f:
@@ -357,13 +375,34 @@ class ReceiptChainImpl(ReceiptChainABC):
                         obj = json.loads(line)
                     except json.JSONDecodeError:
                         continue
-                    # Skip checkpoints
                     if obj.get("checkpoint"):
                         continue
+                    # Confirm this file belongs to the target agent
+                    if not found_agent:
+                        if obj.get("agent_id") == ref.target_agent_id:
+                            found_agent = True
+                        else:
+                            break  # Wrong agent file
                     if obj.get("receipt_id") == ref.ref_receipt_id:
-                        status = obj.get("action", {}).get("status")
-                        return status in ("completed", "confirmed")
-            break  # Found the file, finished scanning
+                        target_obj = obj
+                        break
+
+            if target_obj is None:
+                continue
+
+            # Verify Ed25519 signature on the specific receipt
+            sig_hex = target_obj.get("signature")
+            if not sig_hex:
+                return False
+            try:
+                pub = Ed25519PublicKey.from_public_bytes(target_pub_bytes)
+                receipt_for_signing = {k: v for k, v in target_obj.items() if k != "signature"}
+                pub.verify(bytes.fromhex(sig_hex), canonicalise(receipt_for_signing))
+            except (InvalidSignature, Exception):
+                return False
+
+            status = target_obj.get("action", {}).get("status")
+            return status in ("completed", "confirmed")
 
         return False
 

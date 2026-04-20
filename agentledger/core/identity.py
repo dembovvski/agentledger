@@ -110,7 +110,33 @@ class AgentIdentityImpl(AgentIdentityABC):
         )
 
     def save(self, path: str) -> None:
+        """Save public identity JSON. Does not include private key."""
         import os
         with open(path, "w") as f:
             json.dump(self.serialize(), f, indent=2)
         os.chmod(path, 0o600)
+
+    def save_private_key(self, path: str) -> None:
+        """Save raw Ed25519 private key bytes (hex) to a separate file with 0o400 permissions."""
+        import os
+        raw = self._private_key.private_bytes(Encoding.Raw, PrivateFormat.Raw, NoEncryption())
+        with open(path, "w") as f:
+            f.write(raw.hex())
+        os.chmod(path, 0o400)
+
+    @classmethod
+    def load(cls, identity_path: str, private_key_path: str) -> AgentIdentityImpl:
+        """Reconstruct identity from saved files (identity JSON + private key hex file)."""
+        with open(identity_path) as f:
+            data = json.load(f)
+        with open(private_key_path) as f:
+            key_hex = f.read().strip()
+        private_key = Ed25519PrivateKey.from_private_bytes(bytes.fromhex(key_hex))
+        return cls(
+            private_key=private_key,
+            principal_id=data["principal_id"],
+            binding_type=data["binding_type"],
+            binding_signature=bytes.fromhex(data["binding_signature"]),
+            derived_from=data.get("derived_from"),
+            created_at=data.get("created_at"),
+        )

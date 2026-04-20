@@ -37,6 +37,12 @@ class DenylistPolicy(ActionPolicy):
     def __init__(self, denied_tools: list[str]) -> None:
         self._denied = set(denied_tools)
 
+    @property
+    def policy_id(self) -> str:
+        import hashlib, json
+        config = json.dumps({"type": "denylist", "denied": sorted(self._denied)}, separators=(",", ":"))
+        return hashlib.sha256(config.encode()).hexdigest()
+
     def evaluate(self, action_type: ActionType, tool_name: Optional[str], payload: Optional[str]) -> PolicyResult:
         # tool_name=None cannot match any denylist entry — passes through.
         # TOOL_CALL with no name is rejected earlier by chain.append() validation.
@@ -59,6 +65,12 @@ class AllowlistPolicy(ActionPolicy):
 
     def __init__(self, allowed_tools: list[str]) -> None:
         self._allowed = set(allowed_tools)
+
+    @property
+    def policy_id(self) -> str:
+        import hashlib, json
+        config = json.dumps({"type": "allowlist", "allowed": sorted(self._allowed)}, separators=(",", ":"))
+        return hashlib.sha256(config.encode()).hexdigest()
 
     def evaluate(self, action_type: ActionType, tool_name: Optional[str], payload: Optional[str]) -> PolicyResult:
         if action_type != ActionType.TOOL_CALL:
@@ -111,6 +123,13 @@ class CompositePolicy(ActionPolicy):
 
     def __init__(self, policies: list[ActionPolicy]) -> None:
         self._policies = policies
+
+    @property
+    def policy_id(self) -> str:
+        import hashlib, json
+        sub_ids = [p.policy_id for p in self._policies]
+        config = json.dumps({"type": "composite", "policies": sub_ids}, separators=(",", ":"))
+        return hashlib.sha256(config.encode()).hexdigest()
 
     def evaluate(self, action_type: ActionType, tool_name: Optional[str], payload: Optional[str]) -> PolicyResult:
         for policy in self._policies:

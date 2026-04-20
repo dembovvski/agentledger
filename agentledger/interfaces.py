@@ -101,6 +101,7 @@ class ActionData:
     payload_hash: Optional[str] = None   # SHA256 hex of canonical JSON input
     result_hash: Optional[str] = None     # SHA256 hex of canonical JSON output
     error: Optional[str] = None           # non-null only when status == FAILED
+    policy_hash: Optional[str] = None     # SHA256 hex of policy config — inside signed payload
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -376,6 +377,18 @@ class ActionPolicy(abc.ABC):
     DENY causes a signed DENIED receipt to be written (tamper-evident),
     then raises PolicyViolationError — agent flow is interrupted.
     """
+
+    @property
+    def policy_id(self) -> str:
+        """
+        Stable SHA-256 hex identifier for this policy's configuration.
+
+        Included inside every receipt's signed payload so an auditor can
+        verify which policy was active at the time of each action.
+        Override in subclasses to incorporate configuration state.
+        """
+        import hashlib
+        return hashlib.sha256(self.__class__.__name__.encode()).hexdigest()
 
     @abc.abstractmethod
     def evaluate(
