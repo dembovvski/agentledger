@@ -263,9 +263,17 @@ Python 3.11+. No external services required.
 
 ---
 
-## Standards
+## Standards & Active Discussions
 
-- [LangChain RFC #35691](https://github.com/langchain-ai/langchain/discussions/35691) — ComplianceCallbackHandler, active cross-framework discussion
+AgentLedger is referenced in active cross-framework compliance discussions:
+
+- [LangChain #35691](https://github.com/langchain-ai/langchain/issues/35691#issuecomment-4277422767) — ComplianceCallbackHandler, policy_attestation, cross-framework convergence
+- [Microsoft AutoGen #7353](https://github.com/microsoft/autogen/issues/7353#issuecomment-4279770348) — pre-execution policy gate, signed receipt chains
+- [CrewAI #5541](https://github.com/crewAIInc/crewAI/issues/5541#issuecomment-4279134155) — per-agent covenants, cross-agent receipt linking
+- [NousResearch Hermes #487](https://github.com/NousResearch/hermes-agent/issues/487#issuecomment-4278083652) — agent behavioral constraints, tamper-evident audit trails
+
+Protocol:
+- [IETF Internet-Draft draft-dembowski-agentledger-proof-of-behavior-00](https://datatracker.ietf.org/doc/draft-dembowski-agentledger-proof-of-behavior/)
 - NIST AI Agent Standards Initiative — Q4 2026 Interoperability Profile
 
 ---
