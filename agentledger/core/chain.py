@@ -22,6 +22,7 @@ from agentledger.interfaces import (
     CrossAgentRef,
     CrossAgentRefStatus,
     Framework,
+    PolicyAttestation,
     PolicyVerdict,
     PolicyViolationError,
     Receipt,
@@ -119,7 +120,10 @@ class ReceiptChainImpl(ReceiptChainABC):
                 tool_name=tool_name,
                 status=ActionStatus.DENIED,
                 error=f"policy:denied — {reason}",
-                policy_hash=self._policy.policy_id if self._policy is not None else None,
+                policy_attestation=PolicyAttestation(
+                    policy_digest=self._policy.policy_id,
+                    policy_decision="deny",
+                ),
             ),
             prev_hash=self._prev_hash(),
         )
@@ -179,7 +183,10 @@ class ReceiptChainImpl(ReceiptChainABC):
                     tool_name=tool_name,
                     status=ActionStatus.PENDING,
                     payload_hash=payload_hash,
-                    policy_hash=self._policy.policy_id if self._policy is not None else None,
+                    policy_attestation=PolicyAttestation(
+                        policy_digest=self._policy.policy_id,
+                        policy_decision="permit",
+                    ) if self._policy is not None else None,
                 ),
                 prev_hash=self._prev_hash(),
                 cross_agent_ref=cross_agent_ref,

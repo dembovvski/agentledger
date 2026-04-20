@@ -23,6 +23,7 @@ classifiers = [
 
 dependencies = [
     "cryptography>=42.0",
+    "jcs>=0.2",
 ]
 
 [project.optional-dependencies]

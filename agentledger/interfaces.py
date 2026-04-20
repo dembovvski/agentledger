@@ -41,6 +41,32 @@ class Framework(str, Enum):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Policy attestation (per willamhou RFC 8785 draft)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@dataclass(frozen=True)
+class PolicyAttestation:
+    """
+    Signed evidence that a specific policy artifact produced a specific decision.
+
+    policy_digest  — "sha256:" + hex(SHA-256(RFC 8785 JCS bytes of policy config))
+    policy_decision — "permit" | "deny"  (binary core profile)
+    """
+    policy_digest: str    # "sha256:<64-hex-chars>"
+    policy_decision: str  # "permit" or "deny"
+
+    def __post_init__(self) -> None:
+        import re
+        if not re.fullmatch(r"sha256:[0-9a-f]{64}", self.policy_digest):
+            raise ValueError(f"Invalid policy_digest format: {self.policy_digest!r}")
+        if self.policy_decision not in ("permit", "deny"):
+            raise ValueError(f"policy_decision must be 'permit' or 'deny', got: {self.policy_decision!r}")
+
+    def to_dict(self) -> dict[str, str]:
+        return {"policy_digest": self.policy_digest, "policy_decision": self.policy_decision}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Cross-agent reference
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -98,7 +124,7 @@ class ActionData:
     payload_hash: Optional[str] = None   # SHA256 hex of canonical JSON input
     result_hash: Optional[str] = None     # SHA256 hex of canonical JSON output
     error: Optional[str] = None           # non-null only when status == FAILED
-    policy_hash: Optional[str] = None     # SHA256 hex of policy config — inside signed payload
+    policy_attestation: Optional[PolicyAttestation] = None  # RFC 8785 JCS digest + decision
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -390,7 +416,7 @@ class ActionPolicy(abc.ABC):
         Override in subclasses to incorporate configuration state.
         """
         import hashlib
-        return hashlib.sha256(self.__class__.__name__.encode()).hexdigest()
+        return "sha256:" + hashlib.sha256(self.__class__.__name__.encode()).hexdigest()
 
     @abc.abstractmethod
     def evaluate(

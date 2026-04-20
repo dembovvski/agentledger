@@ -27,7 +27,7 @@ from agentledger.interfaces import (
     Framework,
     PolicyViolationError,
 )
-from agentledger.policies import AllowlistPolicy, DenylistPolicy, CompositePolicy
+from agentledger.policies import AllowAllPolicy, AllowlistPolicy, DenylistPolicy, CompositePolicy
 
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
@@ -48,45 +48,88 @@ def make_chain(identity, tmp_path, policy=None):
 
 # ── policy_hash in signed payload ─────────────────────────────────────────────
 
-def test_policy_hash_present_in_allowed_receipt(identity, tmp_path):
+def test_policy_attestation_present_in_allowed_receipt(identity, tmp_path):
     policy = DenylistPolicy(["rm_rf"])
     chain = make_chain(identity, tmp_path, policy=policy)
     chain.append(ActionType.TOOL_CALL, Framework.CUSTOM, tool_name="safe_tool")
     chain.finalize_last(status=ActionStatus.COMPLETED)
     r = chain.iter_receipts()[0]
-    assert r.action.policy_hash == policy.policy_id
+    assert r.action.policy_attestation is not None
+    assert r.action.policy_attestation.policy_digest == policy.policy_id
+    assert r.action.policy_attestation.policy_decision == "permit"
 
 
-def test_policy_hash_present_in_denied_receipt(identity, tmp_path):
+def test_policy_attestation_present_in_denied_receipt(identity, tmp_path):
     policy = DenylistPolicy(["bad_tool"])
     chain = make_chain(identity, tmp_path, policy=policy)
     with pytest.raises(PolicyViolationError):
         chain.append(ActionType.TOOL_CALL, Framework.CUSTOM, tool_name="bad_tool")
     r = chain.iter_receipts()[0]
     assert r.action.status == ActionStatus.DENIED
-    assert r.action.policy_hash == policy.policy_id
+    assert r.action.policy_attestation is not None
+    assert r.action.policy_attestation.policy_digest == policy.policy_id
+    assert r.action.policy_attestation.policy_decision == "deny"
 
 
-def test_policy_hash_is_inside_signed_payload(identity, tmp_path):
-    """policy_hash must be in the bytes that get signed — not metadata."""
+def test_policy_attestation_is_inside_signed_payload(identity, tmp_path):
+    """policy_attestation must be in the bytes that get signed — not metadata."""
     policy = AllowlistPolicy(["search"])
     chain = make_chain(identity, tmp_path, policy=policy)
     chain.append(ActionType.TOOL_CALL, Framework.CUSTOM, tool_name="search")
     chain.finalize_last(status=ActionStatus.COMPLETED)
     r = chain.iter_receipts()[0]
 
-    # The signed payload is canonicalise_for_signing(receipt) — verify it contains policy_hash
     payload_bytes = canonicalise_for_signing(r)
     payload_dict = json.loads(payload_bytes)
-    assert payload_dict["action"]["policy_hash"] == policy.policy_id
+    attestation = payload_dict["action"]["policy_attestation"]
+    assert attestation is not None
+    assert attestation["policy_digest"] == policy.policy_id
+    assert attestation["policy_decision"] == "permit"
 
 
-def test_policy_hash_none_when_no_policy(identity, tmp_path):
+def test_policy_attestation_none_when_no_policy(identity, tmp_path):
     chain = make_chain(identity, tmp_path, policy=None)
     chain.append(ActionType.TOOL_CALL, Framework.CUSTOM, tool_name="any_tool")
     chain.finalize_last(status=ActionStatus.COMPLETED)
     r = chain.iter_receipts()[0]
-    assert r.action.policy_hash is None
+    assert r.action.policy_attestation is None
+
+
+def test_policy_attestation_allow_all_policy(identity, tmp_path):
+    policy = AllowAllPolicy()
+    chain = make_chain(identity, tmp_path, policy=policy)
+    chain.append(ActionType.TOOL_CALL, Framework.CUSTOM, tool_name="any_tool")
+    chain.finalize_last(status=ActionStatus.COMPLETED)
+    r = chain.iter_receipts()[0]
+    assert r.action.policy_attestation is not None
+    assert r.action.policy_attestation.policy_digest.startswith("sha256:")
+    assert len(r.action.policy_attestation.policy_digest) == 7 + 64
+    assert r.action.policy_attestation.policy_decision == "permit"
+
+
+def test_policy_attestation_composite_round_trip(identity, tmp_path):
+    policy = CompositePolicy([DenylistPolicy(["rm_rf"]), AllowlistPolicy(["search"])])
+    chain = make_chain(identity, tmp_path, policy=policy)
+    chain.append(ActionType.TOOL_CALL, Framework.CUSTOM, tool_name="search")
+    chain.finalize_last(status=ActionStatus.COMPLETED)
+    r = chain.iter_receipts()[0]
+    assert r.action.policy_attestation is not None
+    assert r.action.policy_attestation.policy_digest == policy.policy_id
+    assert r.action.policy_attestation.policy_decision == "permit"
+
+
+def test_policy_digest_format_all_policies():
+    """All policy classes must return 'sha256:<64-hex>' format."""
+    import re
+    pattern = re.compile(r"sha256:[0-9a-f]{64}")
+    policies = [
+        AllowAllPolicy(),
+        DenylistPolicy(["a"]),
+        AllowlistPolicy(["b"]),
+        CompositePolicy([DenylistPolicy(["x"])]),
+    ]
+    for p in policies:
+        assert pattern.fullmatch(p.policy_id), f"{type(p).__name__}.policy_id format wrong: {p.policy_id!r}"
 
 
 def test_policy_id_stable_for_same_config():

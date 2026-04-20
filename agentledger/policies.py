@@ -9,7 +9,10 @@ Usage:
 
 from __future__ import annotations
 
+import hashlib
 from typing import Callable, Optional
+
+import jcs
 
 from agentledger.interfaces import (
     ActionPolicy,
@@ -17,6 +20,11 @@ from agentledger.interfaces import (
     PolicyResult,
     PolicyVerdict,
 )
+
+
+def _policy_digest(config: dict) -> str:
+    """RFC 8785 JCS canonical digest — "sha256:<hex>"."""
+    return "sha256:" + hashlib.sha256(jcs.canonicalize(config)).hexdigest()
 
 
 class AllowAllPolicy(ActionPolicy):
@@ -39,9 +47,7 @@ class DenylistPolicy(ActionPolicy):
 
     @property
     def policy_id(self) -> str:
-        import hashlib, json
-        config = json.dumps({"type": "denylist", "denied": sorted(self._denied)}, separators=(",", ":"))
-        return hashlib.sha256(config.encode()).hexdigest()
+        return _policy_digest({"denied": sorted(self._denied), "type": "denylist"})
 
     def evaluate(self, action_type: ActionType, tool_name: Optional[str], payload: Optional[str]) -> PolicyResult:
         # tool_name=None cannot match any denylist entry — passes through.
@@ -68,9 +74,7 @@ class AllowlistPolicy(ActionPolicy):
 
     @property
     def policy_id(self) -> str:
-        import hashlib, json
-        config = json.dumps({"type": "allowlist", "allowed": sorted(self._allowed)}, separators=(",", ":"))
-        return hashlib.sha256(config.encode()).hexdigest()
+        return _policy_digest({"allowed": sorted(self._allowed), "type": "allowlist"})
 
     def evaluate(self, action_type: ActionType, tool_name: Optional[str], payload: Optional[str]) -> PolicyResult:
         if action_type != ActionType.TOOL_CALL:
@@ -126,10 +130,8 @@ class CompositePolicy(ActionPolicy):
 
     @property
     def policy_id(self) -> str:
-        import hashlib, json
         sub_ids = [p.policy_id for p in self._policies]
-        config = json.dumps({"type": "composite", "policies": sub_ids}, separators=(",", ":"))
-        return hashlib.sha256(config.encode()).hexdigest()
+        return _policy_digest({"policies": sub_ids, "type": "composite"})
 
     def evaluate(self, action_type: ActionType, tool_name: Optional[str], payload: Optional[str]) -> PolicyResult:
         for policy in self._policies:

@@ -29,7 +29,7 @@ def _action_to_dict(action: ActionData) -> dict[str, Any]:
         "error": action.error,
         "framework": action.framework.value,
         "payload_hash": action.payload_hash,
-        "policy_hash": action.policy_hash,
+        "policy_attestation": action.policy_attestation.to_dict() if action.policy_attestation is not None else None,
         "result_hash": action.result_hash,
         "status": action.status.value,
         "tool_name": action.tool_name,
