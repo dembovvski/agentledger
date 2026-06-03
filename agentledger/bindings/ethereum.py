@@ -13,6 +13,7 @@ from typing import Any
 try:
     from web3 import Web3
     from eth_account import Account
+    from eth_account.messages import encode_defunct
 except ImportError as e:
     raise ImportError(
         "EthereumBinding requires web3.py and eth-account. "
@@ -85,12 +86,11 @@ class EthereumBinding(PrincipalBinding):
 
         # Message: agent_id as hex string (same as spec's agent_id field)
         agent_id_hex = agent_public_key.hex()
-        # Ethereum signature: prefix the message per EIP-191
-        # "\x19Ethereum Signed Message:\n" + len(message) + message
-        prefix = f"\x19Ethereum Signed Message:\n{len(agent_id_hex)}{agent_id_hex}"
-        prefix_bytes = prefix.encode("utf-8")
-
-        signed = self._account.sign_message(dict(rawMsg=prefix_bytes))
+        # Ethereum personal_sign (EIP-191): prefix the message with
+        # "\x19Ethereum Signed Message:\n" + len(message) + message.
+        # eth_account >=0.13 uses encode_defunct() instead of raw dicts.
+        signable = encode_defunct(text=agent_id_hex)
+        signed = self._account.sign_message(signable)
         return bytes(signed.signature)
 
     def verify(
@@ -114,8 +114,9 @@ class EthereumBinding(PrincipalBinding):
             return False
 
         try:
+            signable = encode_defunct(text=agent_public_key.hex())
             recovered = Account.recover_message(
-                raw_message=f"\x19Ethereum Signed Message:\n{len(agent_public_key.hex())}{agent_public_key.hex()}".encode("utf-8"),
+                signable,
                 signature=signature,
             )
         except Exception:

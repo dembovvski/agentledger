@@ -94,7 +94,7 @@ class AgentLedgerCallback:
         """
         self.chain.finalize_last(
             status=ActionStatus.FAILED,
-            error=str(error),
+            error=f"{type(error).__name__}: {error}",
         )
 
     # ─── LLM events ────────────────────────────────────────────────────────────
@@ -139,7 +139,10 @@ class AgentLedgerCallback:
         Called when an LLM invocation fails.
         Finalises pending receipt with status=failed.
         """
-        self.chain.finalize_last(status=ActionStatus.FAILED, error=str(error))
+        self.chain.finalize_last(
+            status=ActionStatus.FAILED,
+            error=f"{type(error).__name__}: {error}",
+        )
 
     # ─── Agent decision events ─────────────────────────────────────────────────
 
@@ -303,4 +306,7 @@ class AgentLedgerCallback:
         **kwargs: Any,
     ) -> None:
         """Called when a chat model raises — finalises the PENDING receipt as FAILED."""
-        self.chain.finalize_last(status=ActionStatus.FAILED, error=str(error))
+        self.chain.finalize_last(
+            status=ActionStatus.FAILED,
+            error=f"{type(error).__name__}: {error}",
+        )
